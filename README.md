@@ -66,20 +66,15 @@ Add cards to the company record: open any company → **Customize record** → d
 | `POST /api/enrichment` | `{ companyId, want?: "all"\|"people"\|"brief" }` | cached enrichment: SDR people + counts, brief markdown, deep-links |
 | `POST /api/refresh` | same | same, but bypasses cache (spends credits) |
 
-## ⚠️ Verify against the live Sumble API
+## Verified against the live Sumble API ✅
 
-Sumble's published response schemas are thin. The endpoint paths + response field names are isolated at the top of `backend/server.js` and parsed defensively, but **must be confirmed** with a real key:
+All three Sumble calls were verified end-to-end against the live API (tested with Upwork, 3,392 IC SDRs):
 
-- `SUMBLE_PEOPLE_FIND_PATH` = `/v6/people/find` — confirm `filters.job_functions`/`job_levels` accept the exact strings, and that the total lives in `people_count`.
-- Whether a per-person **Sumble Lead Score** is returned (the SDR People table shows the column only if present).
-- `SUMBLE_BRIEF_PATH` / `SUMBLE_ORG_MATCH_PATH` — confirm exact paths + the brief's markdown field + `sumble_url`, and the 202-pending shape.
+- **People Find** — `POST /v6/people/find` with `organization.domain` + `filters.job_functions` + `filters.job_levels`. Total returned in `people_count`. Per-person fields: `name`, `job_title`, `job_level`, `job_function`, `location`, `linkedin_url`, `url`, `id`. **No per-person Sumble Lead Score is returned** — the SDR People table omits that column accordingly.
+- **Organizations Match** — `POST /v6/organizations/match` with `organizations:[{url}]`; org id is at `results[0].match.id`. Used only to resolve the org id for the brief (1 credit, cached 30d).
+- **Intelligence Brief** — `GET /v6/organizations/{orgId}/intelligence-brief`. Returns `202` + `Retry-After` header while generating (free), then `200` with `body` (markdown) + `sumble_url`. The backend surfaces pending so the card polls.
 
-Quick check once the key is set:
-```bash
-curl -s https://api.sumble.com/v6/people/find \
-  -H "Authorization: Bearer $SUMBLE_API_KEY" -H "Content-Type: application/json" \
-  -d '{"organization":{"domain":"fivetran.com"},"filters":{"job_functions":["Sales Development Representative"],"job_levels":["Individual Contributor","Senior","Lead","Principal"]},"limit":10}' | jq
-```
+Endpoint paths/fields are isolated at the top of `backend/server.js` if Sumble ever revs the API.
 
 ## Phase 2 (not built yet)
 

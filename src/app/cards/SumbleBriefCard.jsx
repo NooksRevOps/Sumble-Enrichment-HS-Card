@@ -38,11 +38,21 @@ const timeAgo = (iso) => {
 };
 
 // --- minimal markdown -> UI-extension components renderer ---
+// Handles inline [text](url) links and **bold** within a line.
 const renderInline = (line, keyBase) => {
-  const parts = line.split(/(\*\*[^*]+\*\*)/g).filter((s) => s !== "");
+  const tokenRe = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g;
+  const parts = line.split(tokenRe).filter((s) => s !== "");
   return parts.map((seg, i) => {
-    const m = seg.match(/^\*\*([^*]+)\*\*$/);
-    if (m) return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{m[1]}</Text>;
+    const link = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (link) {
+      return (
+        <Link key={`${keyBase}-${i}`} href={{ url: link[2], external: true }}>{link[1]}</Link>
+      );
+    }
+    const bold = seg.match(/^\*\*([^*]+)\*\*$/);
+    if (bold) {
+      return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
+    }
     return <Text key={`${keyBase}-${i}`} inline>{seg}</Text>;
   });
 };
