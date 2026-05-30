@@ -1,0 +1,8 @@
+{
+  "uid": "sumble-list-builder-page",
+  "type": "page",
+  "config": {
+    "entrypoint": "/app/pages/SumbleListBuilder.jsx",
+    "location": "home"
+  }
+}

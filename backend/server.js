@@ -351,6 +351,175 @@ app.post('/api/refresh', async (req, res) => {
   }
 });
 
+// ============================================================
+// Phase 2: push a HubSpot company list into a Sumble org list
+// ============================================================
+const MAX_LIST_COMPANIES = 1000; // safety cap per push
+const SUMBLE_LISTS_TTL_MS = 5 * 60 * 1000; // cache the dropdown to limit 1cr/list
+
+// Source dropdown: the account's COMPANY lists (objectTypeId 0-2).
+app.get('/api/hubspot-company-lists', async (_req, res) => {
+  try {
+    const resp = await fetch('https://api.hubapi.com/crm/v3/lists/search', {
+      method: 'POST',
+      headers: hubspotHeaders(),
+      body: JSON.stringify({ query: '', count: 250, offset: 0 }),
+    });
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({}));
+      return res.status(resp.status).json({ status: 'error', message: e.message || 'Failed to read HubSpot lists (is crm.lists.read on the Service Key?)' });
+    }
+    const data = await resp.json();
+    const lists = (data.lists || [])
+      .filter((l) => l.objectTypeId === '0-2')
+      .map((l) => ({
+        id: l.listId,
+        name: l.name,
+        size: l.additionalProperties?.hs_list_size ?? null,
+        type: l.processingType,
+      }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    res.json({ status: 'success', lists });
+  } catch (err) {
+    console.error('[HS LISTS] error:', err.message);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Target dropdown: existing Sumble org lists (1 credit/list; cached 5 min).
+app.get('/api/sumble-lists', async (_req, res) => {
+  try {
+    let lists = await db.getCached('global', 'sumble_lists', SUMBLE_LISTS_TTL_MS);
+    if (!lists) {
+      const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders() });
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        return res.status(resp.status).json({ status: 'error', message: e.message || 'Failed to read Sumble lists' });
+      }
+      const data = await resp.json();
+      lists = (data.lists || data.results || data || []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        url: l.url || null,
+      }));
+      await db.setCached('global', 'sumble_lists', lists);
+    }
+    res.json({ status: 'success', lists });
+  } catch (err) {
+    console.error('[SUMBLE LISTS] error:', err.message);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Read up to MAX_LIST_COMPANIES record ids from a HubSpot list.
+async function getHubspotListMemberIds(listId) {
+  const ids = [];
+  let after = null;
+  do {
+    const url = `https://api.hubapi.com/crm/v3/lists/${listId}/memberships?limit=100${after ? `&after=${after}` : ''}`;
+    const resp = await fetch(url, { headers: hubspotHeaders() });
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({}));
+      const err = new Error(e.message || `Failed to read list ${listId} memberships`);
+      err.status = resp.status;
+      throw err;
+    }
+    const data = await resp.json();
+    for (const r of data.results || []) ids.push(r.recordId);
+    after = data.paging?.next?.after || null;
+  } while (after && ids.length < MAX_LIST_COMPANIES);
+  return ids.slice(0, MAX_LIST_COMPANIES);
+}
+
+// Batch-read sumble_organization_slug for company ids (100 per batch).
+async function getCompanySlugs(companyIds) {
+  const slugs = [];
+  for (let i = 0; i < companyIds.length; i += 100) {
+    const chunk = companyIds.slice(i, i + 100);
+    const resp = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/read', {
+      method: 'POST',
+      headers: hubspotHeaders(),
+      body: JSON.stringify({ properties: ['sumble_organization_slug'], inputs: chunk.map((id) => ({ id })) }),
+    });
+    if (!resp.ok) continue;
+    const data = await resp.json();
+    for (const c of data.results || []) {
+      const slug = c.properties?.sumble_organization_slug;
+      if (slug) slugs.push(slug.trim());
+    }
+  }
+  return slugs;
+}
+
+app.post('/api/push-to-sumble-list', async (req, res) => {
+  try {
+    const { hubspotListId, sumbleListId, newListName } = req.body;
+    if (!hubspotListId) return res.status(400).json({ status: 'error', message: 'Missing hubspotListId' });
+    if (!sumbleListId && !newListName) {
+      return res.status(400).json({ status: 'error', message: 'Pick a Sumble list or provide a new list name' });
+    }
+    if (!SUMBLE_API_KEY) return res.status(500).json({ status: 'error', message: 'SUMBLE_API_KEY not configured' });
+
+    // Resolve target list (create if new).
+    let listId = sumbleListId;
+    let listUrl = null;
+    let listName = null;
+    if (newListName) {
+      const cr = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, {
+        method: 'POST',
+        headers: sumbleHeaders(),
+        body: JSON.stringify({ name: newListName }),
+      });
+      if (!cr.ok) {
+        const e = await cr.json().catch(() => ({}));
+        return res.status(cr.status).json({ status: 'error', message: e.message || 'Failed to create Sumble list' });
+      }
+      const created = await cr.json();
+      listId = created.id;
+      listUrl = created.url || null;
+      listName = created.name || newListName;
+      await db.setCached('global', 'sumble_lists', null); // bust dropdown cache
+    }
+
+    // Read HubSpot list members -> slugs.
+    const memberIds = await getHubspotListMemberIds(hubspotListId);
+    const slugs = await getCompanySlugs(memberIds);
+    const uniqueSlugs = [...new Set(slugs)];
+
+    let added = 0;
+    let failed = 0;
+    if (uniqueSlugs.length > 0) {
+      const ar = await fetch(`${SUMBLE_BASE}/v6/organization-lists/${listId}/organizations`, {
+        method: 'POST',
+        headers: sumbleHeaders(),
+        body: JSON.stringify({ organization_slugs: uniqueSlugs }),
+      });
+      if (!ar.ok) {
+        const e = await ar.json().catch(() => ({}));
+        return res.status(ar.status).json({ status: 'error', message: e.message || 'Failed to add organizations to Sumble list' });
+      }
+      const ad = await ar.json();
+      added = (ad.added || []).length || uniqueSlugs.length;
+      failed = (ad.failed_slugs || []).length;
+    }
+
+    res.json({
+      status: 'success',
+      listId,
+      listName,
+      listUrl,
+      totalCompanies: memberIds.length,
+      withSlug: uniqueSlugs.length,
+      skippedNoSlug: memberIds.length - uniqueSlugs.length,
+      added,
+      failed,
+    });
+  } catch (err) {
+    console.error('[PUSH LIST] error:', err.message);
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 db.init()
   .catch((err) => console.error('[STARTUP] db.init failed (continuing):', err.message))
