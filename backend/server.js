@@ -21,9 +21,9 @@ const SDR_JOB_FUNCTIONS = ['Sales Development Representative'];
 const SDR_JOB_LEVELS = ['Individual Contributor', 'Senior', 'Lead', 'Principal'];
 
 // Cache TTLs
-const PEOPLE_TTL_MS = 24 * 60 * 60 * 1000;     // 24h
-const BRIEF_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7d
-const ORG_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 30d (org id rarely changes)
+const PEOPLE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — matches Sumble's ~monthly refresh
+const BRIEF_TTL_MS = Infinity;                  // brief never auto-expires; refresh is manual
+const ORG_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // 30d (org id rarely changes)
 
 console.log(`[STARTUP] Sumble backend at ${new Date().toISOString()}`);
 console.log(`[STARTUP] Sumble key: ${!!SUMBLE_API_KEY} | HubSpot key: ${!!HUBSPOT_SERVICE_KEY}`);
@@ -238,7 +238,10 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
           result.briefError = 'Could not resolve a Sumble organization id.';
         } else {
           brief = await fetchBrief(orgId);
-          if (brief.status === 'ready') await db.setCached(orgKey, 'brief', brief);
+          if (brief.status === 'ready') {
+            brief.cachedAt = new Date().toISOString(); // for "generated X ago" display
+            await db.setCached(orgKey, 'brief', brief);
+          }
           result.briefStatus = brief.status;
           result.briefRetryAfter = brief.retryAfter || null;
         }
@@ -249,6 +252,7 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
     if (brief) {
       result.brief = brief.markdown;
       result.briefSumbleUrl = brief.sumbleUrl || company.sumble_profile_url || null;
+      result.briefCachedAt = brief.cachedAt || null;
     }
   }
 

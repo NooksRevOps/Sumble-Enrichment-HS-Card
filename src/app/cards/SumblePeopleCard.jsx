@@ -113,7 +113,7 @@ const SumblePeopleCard = ({ actions }) => {
         <Heading inline>IC SDRs at this account</Heading>
         <Text variant="microcopy">
           Sumble's IC-SDR estimate is Nooks' sellable-seat signal. The synced count is free;
-          pull the named people from Sumble to verify it (uses ~1 credit per person, cached 24h).
+          pull the named people from Sumble to verify it (uses ~1 credit per person, cached 30 days).
         </Text>
       </Flex>
 

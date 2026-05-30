@@ -20,6 +20,23 @@ hubspot.extend(({ actions }) => <SumbleBriefCard actions={actions} />);
 const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
 const MAX_POLLS = 8;
 
+// "Generated 3 days ago" style relative time from an ISO timestamp.
+const timeAgo = (iso) => {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
+  const mo = Math.floor(d / 30);
+  return `${mo} month${mo === 1 ? "" : "s"} ago`;
+};
+
 // --- minimal markdown -> UI-extension components renderer ---
 const renderInline = (line, keyBase) => {
   const parts = line.split(/(\*\*[^*]+\*\*)/g).filter((s) => s !== "");
@@ -178,6 +195,7 @@ const SumbleBriefCard = ({ actions }) => {
     );
   }
 
+  const age = timeAgo(data?.briefCachedAt);
   return (
     <Flex direction="column" gap="small">
       {renderMarkdown(data.brief)}
@@ -186,11 +204,14 @@ const SumbleBriefCard = ({ actions }) => {
         {data?.briefSumbleUrl ? (
           <Link href={{ url: data.briefSumbleUrl, external: true }}>Open in Sumble ↗</Link>
         ) : <Text variant="microcopy"> </Text>}
-        <LoadingButton loading={generating} onClick={() => generate("/api/refresh")} variant="secondary" size="xs">
-          Regenerate (uses ~50 credits)
-        </LoadingButton>
+        <Flex direction="row" gap="small" align="center">
+          {age ? <Text variant="microcopy">Generated {age}</Text> : null}
+          <LoadingButton loading={generating} onClick={() => generate("/api/refresh")} variant="secondary" size="xs">
+            Refresh (uses ~50 credits)
+          </LoadingButton>
+        </Flex>
       </Flex>
-      <Text variant="microcopy">Briefs are cached for 7 days, so repeat views don't spend credits.</Text>
+      <Text variant="microcopy">This brief is cached until you refresh it, so repeat views don't spend credits.</Text>
     </Flex>
   );
 };
