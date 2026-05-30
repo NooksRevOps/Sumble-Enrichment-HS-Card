@@ -16,9 +16,12 @@ const SUMBLE_PEOPLE_FIND_PATH = '/v6/people/find';        // POST, organization.
 const SUMBLE_ORG_MATCH_PATH = '/v6/organizations/match';  // POST, resolve domain -> org id
 // Brief is GET /v6/organizations/{orgId}/intelligence-brief (templated in fetchBrief)
 
-// SDR people filter (the hero query). Mirrors the rep's Sumble web filter.
+// People filters. "IC" per Nooks = these four non-manager levels.
 const SDR_JOB_FUNCTIONS = ['Sales Development Representative'];
-const SDR_JOB_LEVELS = ['Individual Contributor', 'Senior', 'Lead', 'Principal'];
+const AE_JOB_FUNCTIONS = ['Account Executive'];
+const IC_JOB_LEVELS = ['Individual Contributor', 'Senior', 'Lead', 'Principal'];
+const PEOPLE_TARGET = 10; // fill up to this many rows: SDRs first, then AEs
+const JOBS_LIMIT = 10;     // job-posting fallback when no SDR/AE people exist
 
 // Cache TTLs
 const PEOPLE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — matches Sumble's ~monthly refresh
@@ -69,15 +72,16 @@ function orgKeyFor(company) {
   return company.sumble_organization_slug || cleanDomain(company) || null;
 }
 
-// ---- Sumble: SDR people query ----
-async function fetchSdrPeople(domain) {
+// ---- Sumble: people for a given function set (IC levels) ----
+async function fetchPeople(domain, jobFunctions, limit) {
+  if (limit <= 0) return { people: [], totalCount: 0 };
   const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_PEOPLE_FIND_PATH}`, {
     method: 'POST',
     headers: sumbleHeaders(),
     body: JSON.stringify({
       organization: { domain },
-      filters: { job_functions: SDR_JOB_FUNCTIONS, job_levels: SDR_JOB_LEVELS },
-      limit: 10,
+      filters: { job_functions: jobFunctions, job_levels: IC_JOB_LEVELS },
+      limit,
     }),
   });
   if (!resp.ok) {
@@ -87,7 +91,6 @@ async function fetchSdrPeople(domain) {
     throw err;
   }
   const data = await resp.json();
-  // Defensive parsing — exact field names to be confirmed against live API.
   const people = (data.people || data.results || data.data || []).map((person) => ({
     id: person.id,
     name: person.name || person.full_name || null,
@@ -97,12 +100,65 @@ async function fetchSdrPeople(domain) {
     location: person.location || person.country || null,
     linkedinUrl: person.linkedin_url || null,
     url: person.url || null,
-    startDate: person.start_date || null, // for tenure in role
+    startDate: person.start_date || null,
     leadScore: person.sumble_lead_score ?? person.lead_score ?? null, // absent in practice
   }));
-  const totalCount =
-    data.people_count ?? data.total ?? data.total_count ?? people.length;
+  const totalCount = data.people_count ?? data.total ?? data.total_count ?? people.length;
   return { people, totalCount };
+}
+
+// ---- Sumble: job postings for a function (fallback when no people exist) ----
+async function fetchJobs(domain, jobFunction, limit) {
+  const resp = await fetch(`${SUMBLE_BASE}/v6/jobs/find`, {
+    method: 'POST',
+    headers: sumbleHeaders(),
+    body: JSON.stringify({
+      organization: { domain },
+      filters: { query: `job_function EQ '${jobFunction}'` },
+      limit,
+    }),
+  });
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({}));
+    const err = new Error(e.message || `Sumble jobs/find failed (${resp.status})`);
+    err.status = resp.status;
+    throw err;
+  }
+  const data = await resp.json();
+  const jobs = (data.jobs || data.results || data.data || []).map((j) => ({
+    id: j.id,
+    title: j.job_title || null,
+    location: j.location || null,
+    jobFunction: j.primary_job_function || jobFunction,
+    postedAt: j.datetime_pulled || null,
+    url: j.url || null,
+  }));
+  const total = data.total ?? data.jobs_count ?? jobs.length;
+  return { jobs, total };
+}
+
+// ---- Cascade: top-10 SDRs, top up with AEs, fall back to SDR job postings ----
+async function buildSdrPeopleData(domain) {
+  const sdr = await fetchPeople(domain, SDR_JOB_FUNCTIONS, PEOPLE_TARGET);
+  let people = sdr.people.map((p) => ({ ...p, type: 'SDR' }));
+  let aeLiveCount = null;
+
+  if (people.length < PEOPLE_TARGET) {
+    const ae = await fetchPeople(domain, AE_JOB_FUNCTIONS, PEOPLE_TARGET - people.length);
+    aeLiveCount = ae.totalCount;
+    people = people.concat(ae.people.map((p) => ({ ...p, type: 'AE' })));
+  }
+
+  const out = { people, sdrLiveCount: sdr.totalCount, aeLiveCount, mode: 'people' };
+
+  // Only look at postings if there are NO SDR and NO AE people.
+  if (people.length === 0) {
+    const sdrJobs = await fetchJobs(domain, 'Sales Development Representative', JOBS_LIMIT);
+    out.mode = 'jobs';
+    out.jobs = sdrJobs.jobs.map((j) => ({ ...j, type: 'SDR' }));
+    out.jobsTotal = sdrJobs.total;
+  }
+  return out;
 }
 
 // ---- Sumble: resolve org id (needed for the brief). 1 credit, cached 30d. ----
@@ -191,10 +247,10 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
     return result;
   }
 
-  // ----- People -----
+  // ----- People (with AE top-up + job-posting fallback) -----
   if (want === 'all' || want === 'people') {
-    let people = force ? null : await db.getCached(orgKey, 'people', PEOPLE_TTL_MS);
-    if (people) {
+    let pdata = force ? null : await db.getCached(orgKey, 'people', PEOPLE_TTL_MS);
+    if (pdata) {
       result.peopleStatus = 'cached';
     } else if (cachedOnly && !force) {
       result.peopleStatus = 'not_loaded'; // gated — no paid call
@@ -204,16 +260,20 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
       result.peopleError = 'No domain to query Sumble people.';
     } else {
       try {
-        people = await fetchSdrPeople(domain);
-        await db.setCached(orgKey, 'people', people);
+        pdata = await buildSdrPeopleData(domain);
+        await db.setCached(orgKey, 'people', pdata);
         result.peopleStatus = 'loaded';
       } catch (err) {
         result.peopleError = err.message;
       }
     }
-    if (people) {
-      result.sdrPeople = people.people;
-      result.sdrLiveCount = people.totalCount;
+    if (pdata) {
+      result.sdrPeople = pdata.people;
+      result.sdrLiveCount = pdata.sdrLiveCount;
+      result.aeLiveCount = pdata.aeLiveCount;
+      result.peopleMode = pdata.mode;
+      result.jobs = pdata.jobs || null;
+      result.jobsTotal = pdata.jobsTotal ?? null;
     }
   }
 

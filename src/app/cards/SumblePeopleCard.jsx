@@ -12,6 +12,7 @@ import {
   TableRow,
   TableHeader,
   TableCell,
+  Tag,
   Link,
   Button,
   LoadingButton,
@@ -29,7 +30,6 @@ const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
 const intOrDash = (v) =>
   v === null || v === undefined || v === "" ? "—" : Math.round(Number(v)).toLocaleString();
 
-// Tenure in current role from a start date.
 const tenure = (startDate) => {
   if (!startDate) return "—";
   const d = new Date(startDate);
@@ -40,6 +40,16 @@ const tenure = (startDate) => {
   const rem = months % 12;
   return rem ? `${yrs}y ${rem}m` : `${yrs} yr`;
 };
+
+const shortDate = (v) => {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+};
+
+const RoleTag = ({ type }) =>
+  type === "AE" ? <Tag variant="success">AE</Tag> : <Tag variant="info">SDR</Tag>;
 
 const SumblePeopleCard = ({ actions }) => {
   const context = useExtensionContext();
@@ -108,9 +118,11 @@ const SumblePeopleCard = ({ actions }) => {
   }
 
   const liveCount = data?.sdrLiveCount;
-  const people = data?.sdrPeople || [];
   const notLoaded = data?.peopleStatus === "not_loaded";
-  const hasLeadScore = people.some((x) => x.leadScore !== null && x.leadScore !== undefined);
+  const mode = data?.peopleMode;
+  const people = data?.sdrPeople || [];
+  const jobs = data?.jobs || [];
+  const aeAdded = people.some((x) => x.type === "AE");
   const mismatch = syncedCount != null && liveCount != null && Number(syncedCount) !== Number(liveCount);
 
   return (
@@ -118,14 +130,15 @@ const SumblePeopleCard = ({ actions }) => {
       <Flex direction="column" gap="extra-small">
         <Heading inline>IC SDR seats</Heading>
         <Text variant="microcopy">
-          Cross-check the IC-SDR count Nooks sells against. Load the named people from Sumble
-          (≈1 credit each, cached 30 days) to confirm the number is real.
+          The IC-SDR count is Nooks' sellable-seat signal. Load Sumble's named people to verify it
+          (≈1 credit each, cached 30 days). Fewer than 10 SDRs? We top up with AEs. None of either?
+          We show open SDR postings instead.
         </Text>
       </Flex>
 
       <Statistics>
-        <StatisticsItem label="Synced (HubSpot)" number={intOrDash(syncedCount)} />
-        {!notLoaded ? <StatisticsItem label="Live (Sumble)" number={intOrDash(liveCount)} /> : null}
+        <StatisticsItem label="Synced SDRs (HubSpot)" number={intOrDash(syncedCount)} />
+        {!notLoaded ? <StatisticsItem label="Live SDRs (Sumble)" number={intOrDash(liveCount)} /> : null}
       </Statistics>
 
       {mismatch ? (
@@ -139,54 +152,95 @@ const SumblePeopleCard = ({ actions }) => {
         <Alert title="Sumble lookup unavailable" variant="warning">{data.peopleError}</Alert>
       ) : null}
 
+      {/* Gated: rep clicks to spend credits */}
       {notLoaded && !data?.peopleError ? (
         <EmptyState title="Confirm the seat count" imageName="contacts" layout="vertical">
-          <Text>Pull the top IC-SDR people from Sumble to verify the synced figure.</Text>
+          <Text>Pull the top IC-SDR people (topped up with AEs) from Sumble to verify the synced figure.</Text>
           <LoadingButton loading={fetching} onClick={() => fetchLive("/api/enrichment")} variant="primary">
-            Load SDR people (uses credits)
+            Load people (uses credits)
           </LoadingButton>
         </EmptyState>
       ) : null}
 
-      {!notLoaded && people.length === 0 && !data?.peopleError ? (
-        <EmptyState title="No SDR-role people found" imageName="contacts" layout="vertical">
-          <Text>Sumble returned no people matching the SDR filter for this account.</Text>
-        </EmptyState>
+      {/* People table (SDRs + AE top-up) */}
+      {!notLoaded && mode === "people" && people.length > 0 ? (
+        <Flex direction="column" gap="extra-small">
+          {aeAdded ? (
+            <Text variant="microcopy">
+              Fewer than 10 IC SDRs — topped up with IC AEs to show the most relevant sellable-seat contacts.
+            </Text>
+          ) : null}
+          <Table bordered={true} density="condensed">
+            <TableHead>
+              <TableRow>
+                <TableHeader width="min">Role</TableHeader>
+                <TableHeader>Name</TableHeader>
+                <TableHeader>Title</TableHeader>
+                <TableHeader>Level</TableHeader>
+                <TableHeader>Tenure</TableHeader>
+                <TableHeader>Location</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {people.map((person, i) => (
+                <TableRow key={person.id || i}>
+                  <TableCell width="min"><RoleTag type={person.type} /></TableCell>
+                  <TableCell>
+                    {person.linkedinUrl ? (
+                      <Link href={{ url: person.linkedinUrl, external: true }}>{person.name || "—"}</Link>
+                    ) : (person.name || "—")}
+                  </TableCell>
+                  <TableCell>{person.title || "—"}</TableCell>
+                  <TableCell>{person.jobLevel || "—"}</TableCell>
+                  <TableCell>{tenure(person.startDate)}</TableCell>
+                  <TableCell>{person.location || "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Flex>
       ) : null}
 
-      {people.length > 0 ? (
-        <Table bordered={true} density="condensed">
-          <TableHead>
-            <TableRow>
-              <TableHeader>Name</TableHeader>
-              <TableHeader>Title</TableHeader>
-              <TableHeader>Level</TableHeader>
-              <TableHeader>Tenure</TableHeader>
-              <TableHeader>Location</TableHeader>
-              {hasLeadScore ? <TableHeader align="right">Lead Score</TableHeader> : null}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {people.map((person, i) => (
-              <TableRow key={person.id || i}>
-                <TableCell>
-                  {person.linkedinUrl ? (
-                    <Link href={{ url: person.linkedinUrl, external: true }}>{person.name || "—"}</Link>
-                  ) : (person.name || "—")}
-                </TableCell>
-                <TableCell>{person.title || "—"}</TableCell>
-                <TableCell>{person.jobLevel || "—"}</TableCell>
-                <TableCell>{tenure(person.startDate)}</TableCell>
-                <TableCell>{person.location || "—"}</TableCell>
-                {hasLeadScore ? (
-                  <TableCell align="right">
-                    {person.leadScore !== null && person.leadScore !== undefined ? person.leadScore : "—"}
-                  </TableCell>
-                ) : null}
+      {/* Job-postings fallback (no SDR or AE people) */}
+      {!notLoaded && mode === "jobs" && jobs.length > 0 ? (
+        <Flex direction="column" gap="extra-small">
+          <Alert title="No SDR or AE employees in Sumble" variant="info">
+            This account has no SDR/AE people, but {intOrDash(data?.jobsTotal)} open SDR posting
+            {Number(data?.jobsTotal) === 1 ? "" : "s"} — still a prospecting signal.
+          </Alert>
+          <Table bordered={true} density="condensed">
+            <TableHead>
+              <TableRow>
+                <TableHeader width="min">Role</TableHeader>
+                <TableHeader>Posting</TableHeader>
+                <TableHeader>Location</TableHeader>
+                <TableHeader>Seen</TableHeader>
+                <TableHeader width="min">Link</TableHeader>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {jobs.map((job, i) => (
+                <TableRow key={job.id || i}>
+                  <TableCell width="min"><RoleTag type={job.type} /></TableCell>
+                  <TableCell>{job.title || "—"}</TableCell>
+                  <TableCell>{job.location || "—"}</TableCell>
+                  <TableCell>{shortDate(job.postedAt)}</TableCell>
+                  <TableCell width="min">
+                    {job.url ? <Link href={{ url: job.url, external: true }}>Open</Link> : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Flex>
+      ) : null}
+
+      {/* Truly empty: no people and no postings */}
+      {!notLoaded && !data?.peopleError &&
+        ((mode === "people" && people.length === 0) || (mode === "jobs" && jobs.length === 0)) ? (
+        <EmptyState title="Nothing found in Sumble" imageName="contacts" layout="vertical">
+          <Text>No SDR or AE people, and no open SDR postings, for this account.</Text>
+        </EmptyState>
       ) : null}
 
       {!notLoaded ? (
