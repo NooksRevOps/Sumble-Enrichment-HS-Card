@@ -11,10 +11,10 @@ const HUBSPOT_SERVICE_KEY = process.env.HUBSPOT_SERVICE_KEY;
 
 const SUMBLE_BASE = 'https://api.sumble.com';
 
-// --- endpoint paths (VERIFY against live API; isolated so they're easy to fix) ---
-const SUMBLE_PEOPLE_FIND_PATH = '/v6/people/find';        // confirmed from docs
-const SUMBLE_ORG_MATCH_PATH = '/v6/organizations/match';  // to resolve org id for the brief
-const SUMBLE_BRIEF_PATH = '/v6/organizations/intelligence-brief'; // VERIFY exact path
+// --- endpoint paths (verified against the live Sumble API) ---
+const SUMBLE_PEOPLE_FIND_PATH = '/v6/people/find';        // POST, organization.domain + filters
+const SUMBLE_ORG_MATCH_PATH = '/v6/organizations/match';  // POST, resolve domain -> org id
+// Brief is GET /v6/organizations/{orgId}/intelligence-brief (templated in fetchBrief)
 
 // SDR people filter (the hero query). Mirrors the rep's Sumble web filter.
 const SDR_JOB_FUNCTIONS = ['Sales Development Representative'];
@@ -104,17 +104,18 @@ async function fetchSdrPeople(domain) {
   return { people, totalCount };
 }
 
-// ---- Sumble: resolve org id (needed for the brief) ----
+// ---- Sumble: resolve org id (needed for the brief). 1 credit, cached 30d. ----
+// Match takes `url` (not `domain`); the id lives at results[0].match.id.
 async function resolveOrgId(domain) {
   const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_ORG_MATCH_PATH}`, {
     method: 'POST',
     headers: sumbleHeaders(),
-    body: JSON.stringify({ organizations: [{ domain }] }),
+    body: JSON.stringify({ organizations: [{ url: domain }] }),
   });
   if (!resp.ok) return null;
   const data = await resp.json();
-  const match = (data.results || data.organizations || data.matches || [])[0];
-  return match?.id ?? match?.organization_id ?? null;
+  const first = (data.results || [])[0];
+  return first?.match?.id ?? first?.id ?? null;
 }
 
 // ---- Sumble: intelligence brief — single, NON-blocking attempt ----
@@ -122,14 +123,13 @@ async function resolveOrgId(domain) {
 // let the card poll, rather than holding the HTTP request open (which would
 // risk HubSpot's fetch timeout). Pending briefs are NOT cached.
 async function fetchBrief(orgId) {
-  const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_BRIEF_PATH}`, {
-    method: 'POST',
+  const resp = await fetch(`${SUMBLE_BASE}/v6/organizations/${orgId}/intelligence-brief`, {
+    method: 'GET',
     headers: sumbleHeaders(),
-    body: JSON.stringify({ organization: { id: orgId } }),
   });
   if (resp.status === 202) {
-    const body = await resp.json().catch(() => ({}));
-    return { status: 'pending', retryAfter: body.retry_after_seconds || 20, markdown: '', sumbleUrl: null };
+    const retryAfter = parseInt(resp.headers.get('retry-after') || '20', 10);
+    return { status: 'pending', retryAfter: Number.isNaN(retryAfter) ? 20 : retryAfter, markdown: '', sumbleUrl: null };
   }
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
@@ -140,7 +140,7 @@ async function fetchBrief(orgId) {
   const data = await resp.json();
   return {
     status: 'ready',
-    markdown: data.body || data.markdown || data.brief || '',
+    markdown: data.body || '',
     sumbleUrl: data.sumble_url || null,
   };
 }
