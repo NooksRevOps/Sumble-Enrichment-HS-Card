@@ -3,12 +3,12 @@ import {
   Text,
   Heading,
   Flex,
-  Box,
   Tile,
   Divider,
   Statistics,
   StatisticsItem,
   StatisticsTrend,
+  ScoreCircle,
   StatusTag,
   Tag,
   Link,
@@ -22,49 +22,22 @@ import {
 
 hubspot.extend(({ actions }) => <SumbleSalesOrgCard actions={actions} />);
 
-// Every sumble_* property we render. All synced, all free (no Sumble API call).
 const PROPERTIES = [
-  "name",
-  "domain",
-  "sumble_organization_name",
-  "sumble_organization_slug",
-  "sumble_profile_url",
-  "account_score__nooks_",
-  "current_sales_segment_sumble",
-  "sumble_employee_count",
-  "sumble_total_people_trends_1yr_percent_g",
-  // Sellable-seat (IC) headcounts — the RevOps verification numbers
-  "sumble_sdr_ic_people_count",
-  "sumble_sdr_people_count",
-  "sumble_sdr_pct_of_sales",
-  "sumble_ae_ic_people_count_people_count",
-  "sumble_ae_people_count",
-  "estimated__ic_sales_team_sumble",
-  // Wider GTM org
-  "sumble_sales_people_count",
-  "sumble_sales_pct_of_employees",
-  "sumble_business_development_people_count",
-  "sumble_revops_people_count",
-  "sumble_sales_enablement_people_count",
-  "sumble_growth_marketing_people_count",
+  "name", "domain",
+  "sumble_organization_name", "sumble_organization_slug", "sumble_profile_url",
+  "account_score__nooks_", "current_sales_segment_sumble",
+  "sumble_employee_count", "sumble_total_people_trends_1yr_percent_g",
+  "sumble_sdr_ic_people_count", "sumble_sdr_people_count", "sumble_sdr_pct_of_sales",
+  "sumble_ae_ic_people_count_people_count", "sumble_ae_people_count", "estimated__ic_sales_team_sumble",
+  "sumble_sales_people_count", "sumble_sales_pct_of_employees",
+  "sumble_business_development_people_count", "sumble_revops_people_count",
+  "sumble_sales_enablement_people_count", "sumble_growth_marketing_people_count",
   "sumble_gtm_engineer_people_count",
-  // Classification
-  "sumble_is_b2b",
-  "sumble_is_b2c",
-  "sumble_is_ai_native",
-  "sumble_primary_leadgen_tools",
-  // Hiring signals
-  "sumble_sdr_job_post_1mo_count",
-  "sumble_sdr_job_post_2yr_count",
-  "sumble_ae_job_post_1mo_count",
-  // Per-segment Sumble deep-links
-  "sumble_sdr_ic_people_url",
-  "sumble_sdr_people_url",
-  "sumble_ae_people_url",
-  "sumble_gtm_engineer_people_url",
+  "sumble_is_b2b", "sumble_is_b2c", "sumble_is_ai_native", "sumble_primary_leadgen_tools",
+  "sumble_sdr_job_post_1mo_count", "sumble_sdr_job_post_2yr_count", "sumble_ae_job_post_1mo_count",
+  "sumble_sdr_ic_people_url", "sumble_ae_people_url",
 ];
 
-// --- value helpers (fetchCrmObjectProperties returns everything as strings) ---
 const num = (v) => {
   if (v === undefined || v === null || v === "") return null;
   const n = parseFloat(v);
@@ -74,7 +47,6 @@ const fmtInt = (v) => {
   const n = num(v);
   return n === null ? "—" : Math.round(n).toLocaleString();
 };
-// percent props may be stored as 0-1 fractions or 0-100; normalize defensively.
 const fmtPct = (v) => {
   let n = num(v);
   if (n === null) return null;
@@ -83,16 +55,21 @@ const fmtPct = (v) => {
 };
 const isTrue = (v) => v === "true" || v === true;
 
-// Nooks fit score → tier label + StatusTag variant. Thresholds adjustable.
-const scoreTier = (score) => {
-  if (score === null) return null;
-  if (score >= 60) return { label: "Great fit", variant: "success" };
-  if (score >= 40) return { label: "Good fit", variant: "info" };
-  if (score >= 20) return { label: "Moderate fit", variant: "warning" };
+const scoreTier = (s) => {
+  if (s === null) return null;
+  if (s >= 60) return { label: "Great fit", variant: "success" };
+  if (s >= 40) return { label: "Good fit", variant: "info" };
+  if (s >= 20) return { label: "Moderate fit", variant: "warning" };
   return { label: "Weak fit", variant: "danger" };
 };
 
-const ext = (url) => (url ? { url, external: true } : null);
+// Synced Sumble URLs often lack a protocol → prepend https so HubSpot treats
+// them as external (otherwise they resolve to a dead in-app URL).
+const ext = (url) => {
+  if (!url) return null;
+  const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return { url: full, external: true };
+};
 
 const SumbleSalesOrgCard = ({ actions }) => {
   const context = useExtensionContext();
@@ -108,8 +85,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
       try {
         setLoading(true);
         setError(null);
-        const props = await actions.fetchCrmObjectProperties(PROPERTIES);
-        setP(props);
+        setP(await actions.fetchCrmObjectProperties(PROPERTIES));
       } catch (err) {
         console.error("[SumbleSalesOrg] load error:", err);
         setError("Couldn't load Sumble data for this company.");
@@ -126,17 +102,14 @@ const SumbleSalesOrgCard = ({ actions }) => {
       </Flex>
     );
   }
-  if (error) {
-    return <Alert title="Error" variant="error">{error}</Alert>;
-  }
+  if (error) return <Alert title="Error" variant="error">{error}</Alert>;
 
   const profileUrl = p?.sumble_profile_url;
   const hasSumble = !!(profileUrl || p?.sumble_organization_slug || num(p?.sumble_employee_count) !== null);
-
   if (!hasSumble) {
     return (
-      <EmptyState title="No Sumble data yet" imageName="object" layout="vertical">
-        <Text>This company doesn't have Sumble enrichment synced yet. Once Sumble data lands on the company properties, this card will populate automatically.</Text>
+      <EmptyState title="No Sumble data yet" imageName="building" layout="vertical">
+        <Text>This company doesn't have Sumble enrichment synced yet. The card will populate automatically once it does.</Text>
       </EmptyState>
     );
   }
@@ -144,23 +117,32 @@ const SumbleSalesOrgCard = ({ actions }) => {
   const fitScore = num(p.account_score__nooks_);
   const tier = scoreTier(fitScore);
   const segment = p.current_sales_segment_sumble;
-  const growth = fmtPct(p.sumble_total_people_trends_1yr_percent_g);
   const growthN = num(p.sumble_total_people_trends_1yr_percent_g);
+  const growth = fmtPct(p.sumble_total_people_trends_1yr_percent_g);
+  const sdr1mo = num(p.sumble_sdr_job_post_1mo_count);
 
   const leadgenTools = (p.sumble_primary_leadgen_tools || "")
-    .split(/[;,]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .split(/[;,]/).map((s) => s.trim()).filter(Boolean);
 
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Header: fit score + segment + size ---- */}
+      {/* ---- Header: fit score gauge + segment + size ---- */}
       <Tile>
-        <Flex direction="row" justify="between" align="center" wrap="wrap" gap="medium">
+        <Flex direction="row" justify="between" align="center" gap="medium" wrap="wrap">
+          <Flex direction="row" gap="medium" align="center">
+            {fitScore !== null ? <ScoreCircle score={Math.max(0, Math.min(100, Math.round(fitScore)))} /> : null}
+            <Flex direction="column" gap="extra-small">
+              <Text variant="microcopy" format={{ fontWeight: "demibold", textTransform: "uppercase" }}>
+                Nooks Fit Score
+              </Text>
+              <Heading inline>{fitScore === null ? "—" : fitScore}</Heading>
+              <Flex direction="row" gap="extra-small" wrap="wrap">
+                {tier ? <StatusTag variant={tier.variant}>{tier.label}</StatusTag> : null}
+                {segment ? <StatusTag variant="info">{segment}</StatusTag> : null}
+              </Flex>
+            </Flex>
+          </Flex>
           <Statistics>
-            <StatisticsItem label="Nooks Fit Score" number={fitScore === null ? "—" : fitScore}>
-              {tier ? <Text>{tier.label}</Text> : null}
-            </StatisticsItem>
             <StatisticsItem label="Employees (Sumble)" number={fmtInt(p.sumble_employee_count)}>
               {growth && growthN !== null ? (
                 <StatisticsTrend
@@ -171,50 +153,46 @@ const SumbleSalesOrgCard = ({ actions }) => {
               ) : null}
             </StatisticsItem>
           </Statistics>
-          <Flex direction="column" align="end" gap="extra-small">
-            {segment ? <StatusTag variant="info">{segment}</StatusTag> : null}
-            {tier ? <StatusTag variant={tier.variant}>{tier.label}</StatusTag> : null}
-          </Flex>
         </Flex>
       </Tile>
 
-      {/* ---- HERO: sellable IC seats (the RevOps-verification numbers) ---- */}
+      {/* ---- HERO: sellable IC seats ---- */}
       <Tile>
         <Flex direction="column" gap="small">
-          <Heading inline>Sellable seats — IC headcount (Sumble)</Heading>
+          <Heading inline>Sellable seats — IC headcount</Heading>
           <Text variant="microcopy">
-            Sumble's estimate of individual-contributor SDRs and AEs — use this to sanity-check RevOps' seat sizing.
+            Sumble's individual-contributor SDR and AE estimates — the basis for Nooks seat sizing.
           </Text>
           <Statistics>
             <StatisticsItem label="IC SDRs" number={fmtInt(p.sumble_sdr_ic_people_count)} />
             <StatisticsItem label="IC AEs" number={fmtInt(p.sumble_ae_ic_people_count_people_count)} />
-            <StatisticsItem label="Total IC Sales Team" number={fmtInt(p.estimated__ic_sales_team_sumble)} />
+            <StatisticsItem label="Total IC Sales" number={fmtInt(p.estimated__ic_sales_team_sumble)} />
           </Statistics>
-          <Flex direction="row" gap="small" wrap="wrap">
+          <Flex direction="row" gap="medium" wrap="wrap">
             {ext(p.sumble_sdr_ic_people_url) ? (
-              <Link href={ext(p.sumble_sdr_ic_people_url)}>View IC SDRs in Sumble ↗</Link>
+              <Link href={ext(p.sumble_sdr_ic_people_url)}>View IC SDRs in Sumble</Link>
             ) : null}
             {ext(p.sumble_ae_people_url) ? (
-              <Link href={ext(p.sumble_ae_people_url)}>View AEs in Sumble ↗</Link>
+              <Link href={ext(p.sumble_ae_people_url)}>View AEs in Sumble</Link>
             ) : null}
           </Flex>
         </Flex>
       </Tile>
 
-      {/* ---- Wider GTM org breakdown ---- */}
+      {/* ---- Wider GTM org ---- */}
       <Tile>
         <Flex direction="column" gap="small">
           <Heading inline>GTM org breakdown</Heading>
           <Statistics>
-            <StatisticsItem label="Total Sales People" number={fmtInt(p.sumble_sales_people_count)} />
+            <StatisticsItem label="Total Sales" number={fmtInt(p.sumble_sales_people_count)} />
             <StatisticsItem label="All SDRs" number={fmtInt(p.sumble_sdr_people_count)} />
             <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
           </Statistics>
           <Statistics>
             <StatisticsItem label="Biz Dev" number={fmtInt(p.sumble_business_development_people_count)} />
             <StatisticsItem label="RevOps" number={fmtInt(p.sumble_revops_people_count)} />
-            <StatisticsItem label="Sales Enablement" number={fmtInt(p.sumble_sales_enablement_people_count)} />
-            <StatisticsItem label="GTM Engineers" number={fmtInt(p.sumble_gtm_engineer_people_count)} />
+            <StatisticsItem label="Enablement" number={fmtInt(p.sumble_sales_enablement_people_count)} />
+            <StatisticsItem label="GTM Eng" number={fmtInt(p.sumble_gtm_engineer_people_count)} />
           </Statistics>
           {fmtPct(p.sumble_sdr_pct_of_sales) || fmtPct(p.sumble_sales_pct_of_employees) ? (
             <Text variant="microcopy">
@@ -225,16 +203,19 @@ const SumbleSalesOrgCard = ({ actions }) => {
         </Flex>
       </Tile>
 
-      {/* ---- Signals: hiring + classification + tools ---- */}
+      {/* ---- Signals ---- */}
       <Tile>
         <Flex direction="column" gap="small">
-          <Heading inline>Signals</Heading>
+          <Flex direction="row" gap="small" align="center" wrap="wrap">
+            <Heading inline>Signals</Heading>
+            {sdr1mo !== null && sdr1mo > 0 ? <StatusTag variant="success">Hiring SDRs</StatusTag> : null}
+          </Flex>
           <Statistics>
-            <StatisticsItem label="SDR job posts (1mo)" number={fmtInt(p.sumble_sdr_job_post_1mo_count)} />
-            <StatisticsItem label="SDR job posts (2yr)" number={fmtInt(p.sumble_sdr_job_post_2yr_count)} />
-            <StatisticsItem label="AE job posts (1mo)" number={fmtInt(p.sumble_ae_job_post_1mo_count)} />
+            <StatisticsItem label="SDR posts · 1mo" number={fmtInt(p.sumble_sdr_job_post_1mo_count)} />
+            <StatisticsItem label="SDR posts · 2yr" number={fmtInt(p.sumble_sdr_job_post_2yr_count)} />
+            <StatisticsItem label="AE posts · 1mo" number={fmtInt(p.sumble_ae_job_post_1mo_count)} />
           </Statistics>
-          <Flex direction="row" gap="small" wrap="wrap">
+          <Flex direction="row" gap="extra-small" wrap="wrap">
             {isTrue(p.sumble_is_b2b) ? <StatusTag variant="success">B2B</StatusTag> : null}
             {isTrue(p.sumble_is_b2c) ? <StatusTag variant="info">B2C</StatusTag> : null}
             {isTrue(p.sumble_is_ai_native) ? <StatusTag variant="warning">AI-native</StatusTag> : null}
@@ -243,9 +224,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
             <Flex direction="column" gap="extra-small">
               <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
               <Flex direction="row" gap="extra-small" wrap="wrap">
-                {leadgenTools.map((t, i) => (
-                  <Tag key={i} variant="default">{t}</Tag>
-                ))}
+                {leadgenTools.map((t, i) => <Tag key={i} variant="info">{t}</Tag>)}
               </Flex>
             </Flex>
           ) : null}
@@ -254,9 +233,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
       <Divider />
       {ext(profileUrl) ? (
-        <Button href={ext(profileUrl)} variant="secondary">
-          Open in Sumble ↗
-        </Button>
+        <Button href={ext(profileUrl)} variant="primary">Open in Sumble</Button>
       ) : null}
     </Flex>
   );

@@ -4,12 +4,13 @@ import {
   Heading,
   Flex,
   Box,
+  Tile,
   Divider,
   Link,
   Button,
   LoadingButton,
+  StatusTag,
   Alert,
-  EmptyState,
   LoadingSpinner,
   hubspot,
   useExtensionContext,
@@ -20,7 +21,12 @@ hubspot.extend(({ actions }) => <SumbleBriefCard actions={actions} />);
 const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
 const MAX_POLLS = 8;
 
-// "Generated 3 days ago" style relative time from an ISO timestamp.
+const ext = (url) => {
+  if (!url) return null;
+  const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return { url: full, external: true };
+};
+
 const timeAgo = (iso) => {
   if (!iso) return null;
   const then = new Date(iso).getTime();
@@ -38,21 +44,14 @@ const timeAgo = (iso) => {
 };
 
 // --- minimal markdown -> UI-extension components renderer ---
-// Handles inline [text](url) links and **bold** within a line.
 const renderInline = (line, keyBase) => {
   const tokenRe = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g;
   const parts = line.split(tokenRe).filter((s) => s !== "");
   return parts.map((seg, i) => {
     const link = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (link) {
-      return (
-        <Link key={`${keyBase}-${i}`} href={{ url: link[2], external: true }}>{link[1]}</Link>
-      );
-    }
+    if (link) return <Link key={`${keyBase}-${i}`} href={ext(link[2])}>{link[1]}</Link>;
     const bold = seg.match(/^\*\*([^*]+)\*\*$/);
-    if (bold) {
-      return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
-    }
+    if (bold) return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
     return <Text key={`${keyBase}-${i}`} inline>{seg}</Text>;
   });
 };
@@ -63,15 +62,9 @@ const renderMarkdown = (md) => {
   const out = [];
   lines.forEach((raw, idx) => {
     const line = raw.trimEnd();
-    if (!line.trim()) {
-      out.push(<Box key={`sp-${idx}`} />);
-      return;
-    }
+    if (!line.trim()) { out.push(<Box key={`sp-${idx}`} />); return; }
     const h = line.match(/^(#{1,3})\s+(.*)$/);
-    if (h) {
-      out.push(<Heading key={`h-${idx}`} inline>{h[2].replace(/\*\*/g, "")}</Heading>);
-      return;
-    }
+    if (h) { out.push(<Heading key={`h-${idx}`} inline>{h[2].replace(/\*\*/g, "")}</Heading>); return; }
     const b = line.match(/^[-*•]\s+(.*)$/);
     if (b) {
       out.push(
@@ -95,13 +88,12 @@ const SumbleBriefCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
 
-  const [loading, setLoading] = useState(true);     // initial cached-only load
-  const [generating, setGenerating] = useState(false); // deliberate paid generate/regenerate
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const pollRef = useRef(0);
 
-  // cachedOnly=true → never spends credits. cachedOnly=false → deliberate generate.
   const callBackend = async (path, cachedOnly) => {
     const resp = await hubspot.fetch(`${BACKEND_URL}${path}`, {
       method: "POST",
@@ -112,7 +104,6 @@ const SumbleBriefCard = ({ actions }) => {
     return json;
   };
 
-  // Once generation has begun, keep polling with cachedOnly:false (pending = free).
   const load = async (path, cachedOnly) => {
     const json = await callBackend(path, cachedOnly);
     setData(json);
@@ -146,7 +137,7 @@ const SumbleBriefCard = ({ actions }) => {
       setGenerating(true);
       setError(null);
       pollRef.current = 0;
-      await load(path, false); // deliberate paid call
+      await load(path, false);
     } catch (err) {
       setError(err.message || "Generate failed.");
     } finally {
@@ -173,14 +164,12 @@ const SumbleBriefCard = ({ actions }) => {
     return (
       <Flex direction="column" gap="small">
         <Alert title="Brief unavailable" variant="warning">{data.briefError}</Alert>
-        {data.briefSumbleUrl ? (
-          <Link href={{ url: data.briefSumbleUrl, external: true }}>Open this account in Sumble ↗</Link>
+        {ext(data.briefSumbleUrl) ? (
+          <Link href={ext(data.briefSumbleUrl)}>Open this account in Sumble</Link>
         ) : null}
       </Flex>
     );
   }
-
-  // Generating (after a deliberate click) → polling.
   if (data?.briefStatus === "pending") {
     return (
       <Flex direction="column" align="center" gap="small">
@@ -190,38 +179,39 @@ const SumbleBriefCard = ({ actions }) => {
     );
   }
 
-  // Gated: nothing cached, no paid call made on open. Rep clicks to generate.
+  // Gated: nothing cached, no paid call on open. Clean tile (no cartoon image).
   if (data?.briefStatus === "not_loaded" || !data?.brief) {
     return (
-      <EmptyState title="Generate the Sumble intelligence brief" imageName="announcement" layout="vertical">
-        <Text>
-          Sumble writes an AI brief for this account — the angle, who to contact first, and the intel.
-          Generating one uses ~50 Sumble credits and is then cached for 7 days.
-        </Text>
-        <LoadingButton loading={generating} onClick={() => generate("/api/enrichment")} variant="primary">
-          Generate brief (uses ~50 credits)
-        </LoadingButton>
-      </EmptyState>
+      <Tile>
+        <Flex direction="column" gap="small">
+          <Heading inline>Sumble Intelligence Brief</Heading>
+          <Text variant="microcopy">
+            Sumble writes an AI account brief — the angle, who to contact first, the intel, and recent
+            changes. Generating one uses ~50 Sumble credits, then it's cached until you refresh it.
+          </Text>
+          <LoadingButton loading={generating} onClick={() => generate("/api/enrichment")} variant="primary">
+            Generate brief (~50 credits)
+          </LoadingButton>
+        </Flex>
+      </Tile>
     );
   }
 
   const age = timeAgo(data?.briefCachedAt);
   return (
     <Flex direction="column" gap="small">
-      {renderMarkdown(data.brief)}
-      <Divider />
-      <Flex direction="row" gap="small" justify="between" align="center" wrap="wrap">
-        {data?.briefSumbleUrl ? (
-          <Link href={{ url: data.briefSumbleUrl, external: true }}>Open in Sumble ↗</Link>
-        ) : <Text variant="microcopy"> </Text>}
+      {/* Top control bar: age + actions, before the brief text */}
+      <Flex direction="row" justify="between" align="center" gap="small" wrap="wrap">
+        {age ? <StatusTag variant="default">Generated {age}</StatusTag> : <Box />}
         <Flex direction="row" gap="small" align="center">
-          {age ? <Text variant="microcopy">Generated {age}</Text> : null}
+          {ext(data?.briefSumbleUrl) ? <Link href={ext(data.briefSumbleUrl)}>Open in Sumble</Link> : null}
           <LoadingButton loading={generating} onClick={() => generate("/api/refresh")} variant="secondary" size="xs">
-            Refresh (uses ~50 credits)
+            Refresh (~50 credits)
           </LoadingButton>
         </Flex>
       </Flex>
-      <Text variant="microcopy">This brief is cached until you refresh it, so repeat views don't spend credits.</Text>
+      <Divider />
+      {renderMarkdown(data.brief)}
     </Flex>
   );
 };

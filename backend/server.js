@@ -97,7 +97,8 @@ async function fetchSdrPeople(domain) {
     location: person.location || person.country || null,
     linkedinUrl: person.linkedin_url || null,
     url: person.url || null,
-    leadScore: person.sumble_lead_score ?? person.lead_score ?? null, // may be absent
+    startDate: person.start_date || null, // for tenure in role
+    leadScore: person.sumble_lead_score ?? person.lead_score ?? null, // absent in practice
   }));
   const totalCount =
     data.people_count ?? data.total ?? data.total_count ?? people.length;
