@@ -130,11 +130,16 @@ const SumblePeopleCard = ({ actions }) => {
   return (
     <Flex direction="column" gap="medium">
       <Flex direction="column" gap="extra-small">
-        <Heading inline>IC SDR seats</Heading>
+        <Text>
+          The <Text inline format={{ fontWeight: "bold" }}>IC-SDR count</Text> is Nooks' sellable-seat
+          number for this account. Hit <Text inline format={{ fontWeight: "bold" }}>Load people</Text> to
+          pull the actual reps from Sumble and confirm it.
+        </Text>
         <Text variant="microcopy">
-          The IC-SDR count is Nooks' sellable-seat signal. Load Sumble's named people to verify it
-          (≈1 credit each, cached 30 days). Fewer than 10 SDRs? We top up with AEs. None of either?
-          We show open SDR postings instead.
+          You'll get the top SDRs first. If Sumble has fewer than 10 on record, we fill the rest with
+          AEs — every row is tagged so you know which is which. If there are no SDRs or AEs at all, we
+          show the company's SDR job postings from the last 12 months instead: they're staffing up, so
+          it's still worth prospecting. (≈1 credit per person, cached 30 days.)
         </Text>
       </Flex>
 
