@@ -72,9 +72,12 @@ const SumbleListBuilder = () => {
       if (targetId === NEW_LIST) body.newListName = newListName.trim();
       else body.sumbleListId = targetId;
       const json = await getJson("/api/push-to-sumble-list", { method: "POST", body });
-      // For an existing target, use the URL we already have from the dropdown.
-      const existing = sumbleLists.find((l) => String(l.id) === String(targetId));
-      json._listUrl = json.listUrl || existing?.url || null;
+      // Deep-link to Organization search FILTERED to this list (the useful view),
+      // not the raw list page. Falls back to the API list url if no id.
+      const listId = json.listId || (targetId !== NEW_LIST ? targetId : null);
+      json._listUrl = listId
+        ? `https://sumble.com/orgs?sort=Sumble+score&desc=1&lists=${listId}`
+        : json.listUrl || null;
       setResult(json);
       // A new list was created → refresh the dropdown.
       if (targetId === NEW_LIST) await loadLists();
@@ -187,7 +190,9 @@ const SumbleListBuilder = () => {
               {result.failed > 0 ? ` ${result.failed} failed.` : ""}
             </Text>
             {result._listUrl ? (
-              <Link href={{ url: result._listUrl, external: true }}>Open the list in Sumble</Link>
+              <Link href={{ url: result._listUrl, external: true }}>
+                Open this list in Sumble (org search, sorted by Sumble score)
+              </Link>
             ) : null}
           </Flex>
         </Alert>
