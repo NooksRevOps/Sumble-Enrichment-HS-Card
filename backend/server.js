@@ -165,8 +165,12 @@ app.get('/health', (_req, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
-// Core: assemble the enrichment payload (cached). section=people|brief|all
-async function buildEnrichment(companyId, { force = false, want = 'all' } = {}) {
+// Core: assemble the enrichment payload (cached). section=people|brief|all.
+// cachedOnly=true (the default for auto-load) NEVER makes a paid Sumble call:
+// it returns cached data or a `*_not_loaded` status. A paid call happens only
+// when the card explicitly passes cachedOnly=false (a deliberate button click)
+// or force=true (Refresh). This is the credit safeguard.
+async function buildEnrichment(companyId, { force = false, want = 'all', cachedOnly = true } = {}) {
   const company = await getCompany(companyId);
   const domain = cleanDomain(company);
   const orgKey = orgKeyFor(company);
@@ -189,59 +193,62 @@ async function buildEnrichment(companyId, { force = false, want = 'all' } = {}) 
   // ----- People -----
   if (want === 'all' || want === 'people') {
     let people = force ? null : await db.getCached(orgKey, 'people', PEOPLE_TTL_MS);
-    if (!people) {
-      if (!SUMBLE_API_KEY) {
-        result.peopleError = 'SUMBLE_API_KEY not configured on backend.';
-      } else if (!domain) {
-        result.peopleError = 'No domain to query Sumble people.';
-      } else {
-        try {
-          people = await fetchSdrPeople(domain);
-          await db.setCached(orgKey, 'people', people);
-        } catch (err) {
-          result.peopleError = err.message;
-        }
+    if (people) {
+      result.peopleStatus = 'cached';
+    } else if (cachedOnly && !force) {
+      result.peopleStatus = 'not_loaded'; // gated — no paid call
+    } else if (!SUMBLE_API_KEY) {
+      result.peopleError = 'SUMBLE_API_KEY not configured on backend.';
+    } else if (!domain) {
+      result.peopleError = 'No domain to query Sumble people.';
+    } else {
+      try {
+        people = await fetchSdrPeople(domain);
+        await db.setCached(orgKey, 'people', people);
+        result.peopleStatus = 'loaded';
+      } catch (err) {
+        result.peopleError = err.message;
       }
     }
     if (people) {
       result.sdrPeople = people.people;
       result.sdrLiveCount = people.totalCount;
-      result.peopleCached = !force;
     }
   }
 
   // ----- Brief -----
   if (want === 'all' || want === 'brief') {
     let brief = force ? null : await db.getCached(orgKey, 'brief', BRIEF_TTL_MS);
-    if (!brief) {
-      if (!SUMBLE_API_KEY) {
-        result.briefError = 'SUMBLE_API_KEY not configured on backend.';
-      } else if (!domain) {
-        result.briefError = 'No domain to resolve Sumble org for the brief.';
-      } else {
-        try {
-          let orgId = await db.getCached(orgKey, 'orgId', ORG_TTL_MS);
-          if (!orgId) {
-            orgId = await resolveOrgId(domain);
-            if (orgId) await db.setCached(orgKey, 'orgId', orgId);
-          }
-          if (!orgId) {
-            result.briefError = 'Could not resolve a Sumble organization id.';
-          } else {
-            brief = await fetchBrief(orgId);
-            if (brief.status === 'ready') await db.setCached(orgKey, 'brief', brief);
-          }
-        } catch (err) {
-          result.briefError = err.message;
+    if (brief) {
+      result.briefStatus = 'ready';
+    } else if (cachedOnly && !force) {
+      result.briefStatus = 'not_loaded'; // gated — no paid call (incl. org match)
+    } else if (!SUMBLE_API_KEY) {
+      result.briefError = 'SUMBLE_API_KEY not configured on backend.';
+    } else if (!domain) {
+      result.briefError = 'No domain to resolve Sumble org for the brief.';
+    } else {
+      try {
+        let orgId = await db.getCached(orgKey, 'orgId', ORG_TTL_MS);
+        if (!orgId) {
+          orgId = await resolveOrgId(domain);
+          if (orgId) await db.setCached(orgKey, 'orgId', orgId);
         }
+        if (!orgId) {
+          result.briefError = 'Could not resolve a Sumble organization id.';
+        } else {
+          brief = await fetchBrief(orgId);
+          if (brief.status === 'ready') await db.setCached(orgKey, 'brief', brief);
+          result.briefStatus = brief.status;
+          result.briefRetryAfter = brief.retryAfter || null;
+        }
+      } catch (err) {
+        result.briefError = err.message;
       }
     }
     if (brief) {
       result.brief = brief.markdown;
-      result.briefStatus = brief.status || 'ready';
-      result.briefRetryAfter = brief.retryAfter || null;
       result.briefSumbleUrl = brief.sumbleUrl || company.sumble_profile_url || null;
-      result.briefCached = brief.status === 'ready' ? !force : false;
     }
   }
 
@@ -250,9 +257,15 @@ async function buildEnrichment(companyId, { force = false, want = 'all' } = {}) 
 
 app.post('/api/enrichment', async (req, res) => {
   try {
-    const { companyId, want } = req.body;
+    const { companyId, want, cachedOnly } = req.body;
     if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
-    const data = await buildEnrichment(companyId, { force: false, want: want || 'all' });
+    // Default cachedOnly=true so auto-load never spends credits; a deliberate
+    // button click sends cachedOnly:false to make the paid call.
+    const data = await buildEnrichment(companyId, {
+      force: false,
+      want: want || 'all',
+      cachedOnly: cachedOnly !== false,
+    });
     res.json({ status: 'success', ...data });
   } catch (err) {
     console.error('[ENRICHMENT] error:', err.message);
