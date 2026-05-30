@@ -8,7 +8,6 @@ import {
   Statistics,
   StatisticsItem,
   StatisticsTrend,
-  ScoreCircle,
   StatusTag,
   Tag,
   Link,
@@ -126,23 +125,11 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Header: fit score gauge + segment + size ---- */}
+      {/* ---- Header: fit score + size, then colored tags ---- */}
       <Tile>
-        <Flex direction="row" justify="between" align="center" gap="medium" wrap="wrap">
-          <Flex direction="row" gap="medium" align="center">
-            {fitScore !== null ? <ScoreCircle score={Math.max(0, Math.min(100, Math.round(fitScore)))} /> : null}
-            <Flex direction="column" gap="extra-small">
-              <Text variant="microcopy" format={{ fontWeight: "demibold", textTransform: "uppercase" }}>
-                Nooks Fit Score
-              </Text>
-              <Heading inline>{fitScore === null ? "—" : fitScore}</Heading>
-              <Flex direction="row" gap="extra-small" wrap="wrap">
-                {tier ? <StatusTag variant={tier.variant}>{tier.label}</StatusTag> : null}
-                {segment ? <StatusTag variant="info">{segment}</StatusTag> : null}
-              </Flex>
-            </Flex>
-          </Flex>
+        <Flex direction="column" gap="small">
           <Statistics>
+            <StatisticsItem label="Nooks Fit Score" number={fitScore === null ? "—" : fitScore} />
             <StatisticsItem label="Employees (Sumble)" number={fmtInt(p.sumble_employee_count)}>
               {growth && growthN !== null ? (
                 <StatisticsTrend
@@ -153,6 +140,10 @@ const SumbleSalesOrgCard = ({ actions }) => {
               ) : null}
             </StatisticsItem>
           </Statistics>
+          <Flex direction="row" gap="extra-small" wrap="wrap">
+            {tier ? <StatusTag variant={tier.variant}>{tier.label}</StatusTag> : null}
+            {segment ? <StatusTag variant="info">{segment}</StatusTag> : null}
+          </Flex>
         </Flex>
       </Tile>
 
@@ -189,7 +180,6 @@ const SumbleSalesOrgCard = ({ actions }) => {
             <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
           </Statistics>
           <Statistics>
-            <StatisticsItem label="Biz Dev" number={fmtInt(p.sumble_business_development_people_count)} />
             <StatisticsItem label="RevOps" number={fmtInt(p.sumble_revops_people_count)} />
             <StatisticsItem label="Enablement" number={fmtInt(p.sumble_sales_enablement_people_count)} />
             <StatisticsItem label="GTM Eng" number={fmtInt(p.sumble_gtm_engineer_people_count)} />
@@ -215,11 +205,16 @@ const SumbleSalesOrgCard = ({ actions }) => {
             <StatisticsItem label="SDR posts · 2yr" number={fmtInt(p.sumble_sdr_job_post_2yr_count)} />
             <StatisticsItem label="AE posts · 1mo" number={fmtInt(p.sumble_ae_job_post_1mo_count)} />
           </Statistics>
-          <Flex direction="row" gap="extra-small" wrap="wrap">
-            {isTrue(p.sumble_is_b2b) ? <StatusTag variant="success">B2B</StatusTag> : null}
-            {isTrue(p.sumble_is_b2c) ? <StatusTag variant="info">B2C</StatusTag> : null}
-            {isTrue(p.sumble_is_ai_native) ? <StatusTag variant="warning">AI-native</StatusTag> : null}
-          </Flex>
+          {isTrue(p.sumble_is_b2b) || isTrue(p.sumble_is_b2c) || isTrue(p.sumble_is_ai_native) ? (
+            <Flex direction="column" gap="extra-small">
+              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Business model</Text>
+              <Flex direction="row" gap="extra-small" wrap="wrap">
+                {isTrue(p.sumble_is_b2b) ? <Tag variant="default">B2B</Tag> : null}
+                {isTrue(p.sumble_is_b2c) ? <Tag variant="default">B2C</Tag> : null}
+                {isTrue(p.sumble_is_ai_native) ? <Tag variant="default">AI-native</Tag> : null}
+              </Flex>
+            </Flex>
+          ) : null}
           {leadgenTools.length > 0 ? (
             <Flex direction="column" gap="extra-small">
               <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
