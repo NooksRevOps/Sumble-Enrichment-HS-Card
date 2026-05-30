@@ -1,0 +1,13 @@
+{
+  "name": "sumble-enrichment-card",
+  "version": "1.0.0",
+  "description": "HubSpot custom cards that surface Sumble enrichment depth (SDR seats, people, intelligence brief) on the company record.",
+  "scripts": {
+    "install-deps": "hs project install-deps",
+    "upload": "hs project upload",
+    "dev": "hs project dev"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

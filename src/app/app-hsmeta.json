@@ -1,0 +1,21 @@
+{
+  "uid": "sumble-enrichment-app",
+  "type": "app",
+  "config": {
+    "name": "Sumble Enrichment",
+    "description": "Surface Sumble enrichment depth (SDR seats, named people, intelligence brief) directly on the HubSpot company record.",
+    "distribution": "private",
+    "auth": {
+      "type": "static",
+      "requiredScopes": [
+        "oauth",
+        "crm.objects.companies.read"
+      ]
+    },
+    "permittedUrls": {
+      "fetch": ["https://sumble-enrichment-backend.onrender.com"],
+      "img": [],
+      "iframe": []
+    }
+  }
+}

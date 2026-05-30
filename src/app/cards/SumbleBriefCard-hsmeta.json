@@ -1,0 +1,11 @@
+{
+  "uid": "sumble-brief-card",
+  "type": "card",
+  "config": {
+    "name": "Sumble · Intelligence Brief",
+    "description": "Sumble's AI-generated account brief (angle, who to contact, the intel). Generated on demand; uses Sumble credits.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/SumbleBriefCard.jsx",
+    "objectTypes": ["COMPANIES"]
+  }
+}

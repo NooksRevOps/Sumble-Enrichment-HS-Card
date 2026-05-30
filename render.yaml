@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: sumble-enrichment-backend
+    runtime: node
+    region: oregon
+    plan: starter
+    branch: main
+    autoDeploy: true
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: SUMBLE_API_KEY
+        sync: false
+      - key: HUBSPOT_SERVICE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_ENV
+        value: production

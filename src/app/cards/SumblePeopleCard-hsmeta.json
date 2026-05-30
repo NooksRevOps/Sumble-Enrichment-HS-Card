@@ -1,0 +1,11 @@
+{
+  "uid": "sumble-people-card",
+  "type": "card",
+  "config": {
+    "name": "Sumble · SDR People",
+    "description": "The named SDR-role people behind the synced count, pulled live from Sumble to verify sellable-seat sizing. Uses Sumble credits on first load.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/SumblePeopleCard.jsx",
+    "objectTypes": ["COMPANIES"]
+  }
+}
