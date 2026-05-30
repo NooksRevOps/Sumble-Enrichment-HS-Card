@@ -107,14 +107,15 @@ async function fetchPeople(domain, jobFunctions, limit) {
   return { people, totalCount };
 }
 
-// ---- Sumble: job postings for a function (fallback when no people exist) ----
+// ---- Sumble: job postings for a function in the last 12 months ----
+// Mirrors the Sumble web filter: job_function + hiring_period '1yr'.
 async function fetchJobs(domain, jobFunction, limit) {
   const resp = await fetch(`${SUMBLE_BASE}/v6/jobs/find`, {
     method: 'POST',
     headers: sumbleHeaders(),
     body: JSON.stringify({
       organization: { domain },
-      filters: { query: `job_function EQ '${jobFunction}'` },
+      filters: { query: `job_function EQ '${jobFunction}' AND hiring_period EQ '1yr'` },
       limit,
     }),
   });

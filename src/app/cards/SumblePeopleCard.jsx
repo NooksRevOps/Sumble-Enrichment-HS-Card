@@ -207,8 +207,8 @@ const SumblePeopleCard = ({ actions }) => {
       {!notLoaded && mode === "jobs" && jobs.length > 0 ? (
         <Flex direction="column" gap="extra-small">
           <Alert title="No SDR or AE employees in Sumble" variant="info">
-            This account has no SDR/AE people, but {intOrDash(data?.jobsTotal)} open SDR posting
-            {Number(data?.jobsTotal) === 1 ? "" : "s"} — still a prospecting signal.
+            This account has no SDR/AE people, but {intOrDash(data?.jobsTotal)} SDR posting
+            {Number(data?.jobsTotal) === 1 ? "" : "s"} in the last 12 months — still a prospecting signal.
           </Alert>
           <Table bordered={true} density="condensed">
             <TableHead>
