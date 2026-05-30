@@ -521,6 +521,56 @@ app.post('/api/push-to-sumble-list', async (req, res) => {
   }
 });
 
+// Add specific org slugs to a Sumble list (create if newListName). Used by the
+// per-company "Add to Sumble list" card (slug known client-side) — free.
+app.post('/api/add-to-sumble-list', async (req, res) => {
+  try {
+    const { slugs, sumbleListId, newListName } = req.body;
+    if (!Array.isArray(slugs) || slugs.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No company slugs provided' });
+    }
+    if (!sumbleListId && !newListName) {
+      return res.status(400).json({ status: 'error', message: 'Pick a Sumble list or provide a new list name' });
+    }
+    if (!SUMBLE_API_KEY) return res.status(500).json({ status: 'error', message: 'SUMBLE_API_KEY not configured' });
+
+    let listId = sumbleListId;
+    let listUrl = null;
+    let listName = null;
+    if (newListName) {
+      const cr = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, {
+        method: 'POST', headers: sumbleHeaders(), body: JSON.stringify({ name: newListName }),
+      });
+      if (!cr.ok) {
+        const e = await cr.json().catch(() => ({}));
+        return res.status(cr.status).json({ status: 'error', message: e.message || 'Failed to create Sumble list' });
+      }
+      const created = await cr.json();
+      listId = created.id; listUrl = created.url || null; listName = created.name || newListName;
+      await db.setCached('global', 'sumble_lists', null); // bust dropdown cache
+    }
+
+    const uniqueSlugs = [...new Set(slugs.map((s) => String(s).trim()).filter(Boolean))];
+    const ar = await fetch(`${SUMBLE_BASE}/v6/organization-lists/${listId}/organizations`, {
+      method: 'POST', headers: sumbleHeaders(), body: JSON.stringify({ organization_slugs: uniqueSlugs }),
+    });
+    if (!ar.ok) {
+      const e = await ar.json().catch(() => ({}));
+      return res.status(ar.status).json({ status: 'error', message: e.message || 'Failed to add to Sumble list' });
+    }
+    const ad = await ar.json();
+    res.json({
+      status: 'success',
+      listId, listName, listUrl,
+      added: (ad.added || []).length || uniqueSlugs.length,
+      failed: (ad.failed_slugs || []).length,
+    });
+  } catch (err) {
+    console.error('[ADD TO LIST] error:', err.message);
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 db.init()
   .catch((err) => console.error('[STARTUP] db.init failed (continuing):', err.message))

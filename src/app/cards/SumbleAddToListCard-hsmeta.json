@@ -1,0 +1,11 @@
+{
+  "uid": "sumble-add-to-list-card",
+  "type": "card",
+  "config": {
+    "name": "Sumble · Add to List",
+    "description": "Add this company to a Sumble organization list (existing or new) so you can work it as a segment. Free — no Sumble credits to add.",
+    "location": "crm.record.sidebar",
+    "entrypoint": "/app/cards/SumbleAddToListCard.jsx",
+    "objectTypes": ["COMPANIES"]
+  }
+}
