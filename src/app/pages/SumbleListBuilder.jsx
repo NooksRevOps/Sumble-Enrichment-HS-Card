@@ -107,7 +107,10 @@ const SumbleListBuilder = () => {
     value: String(l.id),
   }));
   const targetOptions = [
-    ...sumbleLists.map((l) => ({ label: l.name, value: String(l.id) })),
+    ...sumbleLists.map((l) => ({
+      label: l.count != null ? `${l.name} (${l.count})` : l.name,
+      value: String(l.id),
+    })),
     { label: "➕ Create a new list…", value: NEW_LIST },
   ];
 

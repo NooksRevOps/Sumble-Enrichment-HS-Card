@@ -397,10 +397,11 @@ app.get('/api/sumble-lists', async (_req, res) => {
         return res.status(resp.status).json({ status: 'error', message: e.message || 'Failed to read Sumble lists' });
       }
       const data = await resp.json();
-      lists = (data.lists || data.results || data || []).map((l) => ({
+      lists = (data.organization_lists || data.lists || data.results || []).map((l) => ({
         id: l.id,
         name: l.name,
         url: l.url || null,
+        count: l.organizations_count ?? null,
       }));
       await db.setCached('global', 'sumble_lists', lists);
     }
