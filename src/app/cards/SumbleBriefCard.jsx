@@ -44,14 +44,22 @@ const timeAgo = (iso) => {
 };
 
 // --- minimal markdown -> UI-extension components renderer ---
+const LINK_RE = /^\[([^\]]+)\]\(([^)]+)\)$/;
 const renderInline = (line, keyBase) => {
+  // Tokenize on links and bold. Bold may itself WRAP a link (Sumble uses
+  // **[text](url)** for section headers), so when a bold token's inner is a
+  // link, render the link (a Link can't carry bold formatting).
   const tokenRe = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g;
   const parts = line.split(tokenRe).filter((s) => s !== "");
   return parts.map((seg, i) => {
-    const link = seg.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    const link = seg.match(LINK_RE);
     if (link) return <Link key={`${keyBase}-${i}`} href={ext(link[2])}>{link[1]}</Link>;
     const bold = seg.match(/^\*\*([^*]+)\*\*$/);
-    if (bold) return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
+    if (bold) {
+      const innerLink = bold[1].match(LINK_RE);
+      if (innerLink) return <Link key={`${keyBase}-${i}`} href={ext(innerLink[2])}>{innerLink[1]}</Link>;
+      return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
+    }
     return <Text key={`${keyBase}-${i}`} inline>{seg}</Text>;
   });
 };
