@@ -119,7 +119,9 @@ const SumblePeopleCard = ({ actions }) => {
 
   const liveCount = data?.sdrLiveCount;
   const notLoaded = data?.peopleStatus === "not_loaded";
-  const mode = data?.peopleMode;
+  // Default to "people" so entries cached under the pre-cascade format (no
+  // peopleMode/type) still render as an all-SDR table; RoleTag defaults to SDR.
+  const mode = data?.peopleMode || "people";
   const people = data?.sdrPeople || [];
   const jobs = data?.jobs || [];
   const aeAdded = people.some((x) => x.type === "AE");
