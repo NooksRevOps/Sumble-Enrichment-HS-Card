@@ -6,8 +6,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const SUMBLE_API_KEY = process.env.SUMBLE_API_KEY;
+const ENV_SUMBLE_KEY = process.env.SUMBLE_API_KEY; // fallback when no key is stored
 const HUBSPOT_SERVICE_KEY = process.env.HUBSPOT_SERVICE_KEY;
+// Single-tenant guard: if set, only this HubSpot portal may connect/use Sumble.
+// (For multi-tenant/marketplace, replace with HubSpot request-signature verification.)
+const ALLOWED_PORTAL_ID = process.env.ALLOWED_PORTAL_ID || null;
 
 const SUMBLE_BASE = 'https://api.sumble.com';
 
@@ -29,16 +32,40 @@ const BRIEF_TTL_MS = Infinity;                  // brief never auto-expires; ref
 const ORG_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // 30d (org id rarely changes)
 
 console.log(`[STARTUP] Sumble backend at ${new Date().toISOString()}`);
-console.log(`[STARTUP] Sumble key: ${!!SUMBLE_API_KEY} | HubSpot key: ${!!HUBSPOT_SERVICE_KEY}`);
+console.log(`[STARTUP] env Sumble key: ${!!ENV_SUMBLE_KEY} | HubSpot key: ${!!HUBSPOT_SERVICE_KEY} | portal guard: ${ALLOWED_PORTAL_ID || 'off'}`);
 
-const sumbleHeaders = () => ({
-  Authorization: `Bearer ${SUMBLE_API_KEY}`,
+const sumbleHeaders = (apiKey) => ({
+  Authorization: `Bearer ${apiKey}`,
   'Content-Type': 'application/json',
 });
 const hubspotHeaders = () => ({
   Authorization: `Bearer ${HUBSPOT_SERVICE_KEY}`,
   'Content-Type': 'application/json',
 });
+
+// Resolve the Sumble key for a request: the admin-connected key stored for this
+// portal (encrypted in Postgres), else the ENV_SUMBLE_KEY fallback.
+async function resolveSumbleKey(portalId) {
+  if (portalId) {
+    try {
+      const s = await db.getSecret(portalId);
+      if (s && s.value) return s.value;
+    } catch (err) {
+      console.error('[KEY] getSecret failed:', err.message);
+    }
+  }
+  return ENV_SUMBLE_KEY || null;
+}
+
+// Test a Sumble key with a cheap call (list org-lists). Returns true if accepted.
+async function testSumbleKey(apiKey) {
+  try {
+    const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders(apiKey) });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
 
 // ---- HubSpot: read the Sumble identity + synced count off the company ----
 async function getCompany(companyId) {
@@ -73,11 +100,11 @@ function orgKeyFor(company) {
 }
 
 // ---- Sumble: people for a given function set (IC levels) ----
-async function fetchPeople(domain, jobFunctions, limit) {
+async function fetchPeople(domain, jobFunctions, limit, apiKey) {
   if (limit <= 0) return { people: [], totalCount: 0 };
   const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_PEOPLE_FIND_PATH}`, {
     method: 'POST',
-    headers: sumbleHeaders(),
+    headers: sumbleHeaders(apiKey),
     body: JSON.stringify({
       organization: { domain },
       filters: { job_functions: jobFunctions, job_levels: IC_JOB_LEVELS },
@@ -109,10 +136,10 @@ async function fetchPeople(domain, jobFunctions, limit) {
 
 // ---- Sumble: job postings for a function in the last 12 months ----
 // Mirrors the Sumble web filter: job_function + hiring_period '1yr'.
-async function fetchJobs(domain, jobFunction, limit) {
+async function fetchJobs(domain, jobFunction, limit, apiKey) {
   const resp = await fetch(`${SUMBLE_BASE}/v6/jobs/find`, {
     method: 'POST',
-    headers: sumbleHeaders(),
+    headers: sumbleHeaders(apiKey),
     body: JSON.stringify({
       organization: { domain },
       filters: { query: `job_function EQ '${jobFunction}' AND hiring_period EQ '1yr'` },
@@ -139,13 +166,13 @@ async function fetchJobs(domain, jobFunction, limit) {
 }
 
 // ---- Cascade: top-10 SDRs, top up with AEs, fall back to SDR job postings ----
-async function buildSdrPeopleData(domain) {
-  const sdr = await fetchPeople(domain, SDR_JOB_FUNCTIONS, PEOPLE_TARGET);
+async function buildSdrPeopleData(domain, apiKey) {
+  const sdr = await fetchPeople(domain, SDR_JOB_FUNCTIONS, PEOPLE_TARGET, apiKey);
   let people = sdr.people.map((p) => ({ ...p, type: 'SDR' }));
   let aeLiveCount = null;
 
   if (people.length < PEOPLE_TARGET) {
-    const ae = await fetchPeople(domain, AE_JOB_FUNCTIONS, PEOPLE_TARGET - people.length);
+    const ae = await fetchPeople(domain, AE_JOB_FUNCTIONS, PEOPLE_TARGET - people.length, apiKey);
     aeLiveCount = ae.totalCount;
     people = people.concat(ae.people.map((p) => ({ ...p, type: 'AE' })));
   }
@@ -154,7 +181,7 @@ async function buildSdrPeopleData(domain) {
 
   // Only look at postings if there are NO SDR and NO AE people.
   if (people.length === 0) {
-    const sdrJobs = await fetchJobs(domain, 'Sales Development Representative', JOBS_LIMIT);
+    const sdrJobs = await fetchJobs(domain, 'Sales Development Representative', JOBS_LIMIT, apiKey);
     out.mode = 'jobs';
     out.jobs = sdrJobs.jobs.map((j) => ({ ...j, type: 'SDR' }));
     out.jobsTotal = sdrJobs.total;
@@ -164,10 +191,10 @@ async function buildSdrPeopleData(domain) {
 
 // ---- Sumble: resolve org id (needed for the brief). 1 credit, cached 30d. ----
 // Match takes `url` (not `domain`); the id lives at results[0].match.id.
-async function resolveOrgId(domain) {
+async function resolveOrgId(domain, apiKey) {
   const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_ORG_MATCH_PATH}`, {
     method: 'POST',
-    headers: sumbleHeaders(),
+    headers: sumbleHeaders(apiKey),
     body: JSON.stringify({ organizations: [{ url: domain }] }),
   });
   if (!resp.ok) return null;
@@ -180,10 +207,10 @@ async function resolveOrgId(domain) {
 // Sumble returns 202 while generating (free); we surface that as `pending` and
 // let the card poll, rather than holding the HTTP request open (which would
 // risk HubSpot's fetch timeout). Pending briefs are NOT cached.
-async function fetchBrief(orgId) {
+async function fetchBrief(orgId, apiKey) {
   const resp = await fetch(`${SUMBLE_BASE}/v6/organizations/${orgId}/intelligence-brief`, {
     method: 'GET',
-    headers: sumbleHeaders(),
+    headers: sumbleHeaders(apiKey),
   });
   if (resp.status === 202) {
     const retryAfter = parseInt(resp.headers.get('retry-after') || '20', 10);
@@ -228,7 +255,8 @@ app.get('/health', (_req, res) =>
 // it returns cached data or a `*_not_loaded` status. A paid call happens only
 // when the card explicitly passes cachedOnly=false (a deliberate button click)
 // or force=true (Refresh). This is the credit safeguard.
-async function buildEnrichment(companyId, { force = false, want = 'all', cachedOnly = true } = {}) {
+async function buildEnrichment(companyId, { force = false, want = 'all', cachedOnly = true, sumbleKey = null } = {}) {
+  const NOT_CONNECTED = 'Sumble isn\'t connected. An admin can connect it in the app\'s Settings.';
   const company = await getCompany(companyId);
   const domain = cleanDomain(company);
   const orgKey = orgKeyFor(company);
@@ -255,13 +283,13 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
       result.peopleStatus = 'cached';
     } else if (cachedOnly && !force) {
       result.peopleStatus = 'not_loaded'; // gated — no paid call
-    } else if (!SUMBLE_API_KEY) {
-      result.peopleError = 'SUMBLE_API_KEY not configured on backend.';
+    } else if (!sumbleKey) {
+      result.peopleError = NOT_CONNECTED;
     } else if (!domain) {
       result.peopleError = 'No domain to query Sumble people.';
     } else {
       try {
-        pdata = await buildSdrPeopleData(domain);
+        pdata = await buildSdrPeopleData(domain, sumbleKey);
         await db.setCached(orgKey, 'people', pdata);
         result.peopleStatus = 'loaded';
       } catch (err) {
@@ -285,21 +313,21 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
       result.briefStatus = 'ready';
     } else if (cachedOnly && !force) {
       result.briefStatus = 'not_loaded'; // gated — no paid call (incl. org match)
-    } else if (!SUMBLE_API_KEY) {
-      result.briefError = 'SUMBLE_API_KEY not configured on backend.';
+    } else if (!sumbleKey) {
+      result.briefError = NOT_CONNECTED;
     } else if (!domain) {
       result.briefError = 'No domain to resolve Sumble org for the brief.';
     } else {
       try {
         let orgId = await db.getCached(orgKey, 'orgId', ORG_TTL_MS);
         if (!orgId) {
-          orgId = await resolveOrgId(domain);
+          orgId = await resolveOrgId(domain, sumbleKey);
           if (orgId) await db.setCached(orgKey, 'orgId', orgId);
         }
         if (!orgId) {
           result.briefError = 'Could not resolve a Sumble organization id.';
         } else {
-          brief = await fetchBrief(orgId);
+          brief = await fetchBrief(orgId, sumbleKey);
           if (brief.status === 'ready') {
             brief.cachedAt = new Date().toISOString(); // for "generated X ago" display
             await db.setCached(orgKey, 'brief', brief);
@@ -323,14 +351,16 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
 
 app.post('/api/enrichment', async (req, res) => {
   try {
-    const { companyId, want, cachedOnly } = req.body;
+    const { companyId, want, cachedOnly, portalId } = req.body;
     if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
+    const sumbleKey = await resolveSumbleKey(portalId);
     // Default cachedOnly=true so auto-load never spends credits; a deliberate
     // button click sends cachedOnly:false to make the paid call.
     const data = await buildEnrichment(companyId, {
       force: false,
       want: want || 'all',
       cachedOnly: cachedOnly !== false,
+      sumbleKey,
     });
     res.json({ status: 'success', ...data });
   } catch (err) {
@@ -341,9 +371,10 @@ app.post('/api/enrichment', async (req, res) => {
 
 app.post('/api/refresh', async (req, res) => {
   try {
-    const { companyId, want } = req.body;
+    const { companyId, want, portalId } = req.body;
     if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
-    const data = await buildEnrichment(companyId, { force: true, want: want || 'all' });
+    const sumbleKey = await resolveSumbleKey(portalId);
+    const data = await buildEnrichment(companyId, { force: true, want: want || 'all', sumbleKey });
     res.json({ status: 'success', ...data });
   } catch (err) {
     console.error('[REFRESH] error:', err.message);
@@ -387,11 +418,13 @@ app.get('/api/hubspot-company-lists', async (_req, res) => {
 });
 
 // Target dropdown: existing Sumble org lists (1 credit/list; cached 5 min).
-app.get('/api/sumble-lists', async (_req, res) => {
+app.get('/api/sumble-lists', async (req, res) => {
   try {
+    const sumbleKey = await resolveSumbleKey(req.query.portalId);
+    if (!sumbleKey) return res.status(409).json({ status: 'error', message: 'Sumble isn\'t connected. Connect it in the app Settings.' });
     let lists = await db.getCached('global', 'sumble_lists', SUMBLE_LISTS_TTL_MS);
     if (!lists) {
-      const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders() });
+      const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders(sumbleKey) });
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
         return res.status(resp.status).json({ status: 'error', message: e.message || 'Failed to read Sumble lists' });
@@ -454,12 +487,13 @@ async function getCompanySlugs(companyIds) {
 
 app.post('/api/push-to-sumble-list', async (req, res) => {
   try {
-    const { hubspotListId, sumbleListId, newListName } = req.body;
+    const { hubspotListId, sumbleListId, newListName, portalId } = req.body;
     if (!hubspotListId) return res.status(400).json({ status: 'error', message: 'Missing hubspotListId' });
     if (!sumbleListId && !newListName) {
       return res.status(400).json({ status: 'error', message: 'Pick a Sumble list or provide a new list name' });
     }
-    if (!SUMBLE_API_KEY) return res.status(500).json({ status: 'error', message: 'SUMBLE_API_KEY not configured' });
+    const sumbleKey = await resolveSumbleKey(portalId);
+    if (!sumbleKey) return res.status(409).json({ status: 'error', message: 'Sumble isn\'t connected. Connect it in the app Settings.' });
 
     // Resolve target list (create if new).
     let listId = sumbleListId;
@@ -468,7 +502,7 @@ app.post('/api/push-to-sumble-list', async (req, res) => {
     if (newListName) {
       const cr = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, {
         method: 'POST',
-        headers: sumbleHeaders(),
+        headers: sumbleHeaders(sumbleKey),
         body: JSON.stringify({ name: newListName }),
       });
       if (!cr.ok) {
@@ -492,7 +526,7 @@ app.post('/api/push-to-sumble-list', async (req, res) => {
     if (uniqueSlugs.length > 0) {
       const ar = await fetch(`${SUMBLE_BASE}/v6/organization-lists/${listId}/organizations`, {
         method: 'POST',
-        headers: sumbleHeaders(),
+        headers: sumbleHeaders(sumbleKey),
         body: JSON.stringify({ organization_slugs: uniqueSlugs }),
       });
       if (!ar.ok) {
@@ -525,21 +559,22 @@ app.post('/api/push-to-sumble-list', async (req, res) => {
 // per-company "Add to Sumble list" card (slug known client-side) — free.
 app.post('/api/add-to-sumble-list', async (req, res) => {
   try {
-    const { slugs, sumbleListId, newListName } = req.body;
+    const { slugs, sumbleListId, newListName, portalId } = req.body;
     if (!Array.isArray(slugs) || slugs.length === 0) {
       return res.status(400).json({ status: 'error', message: 'No company slugs provided' });
     }
     if (!sumbleListId && !newListName) {
       return res.status(400).json({ status: 'error', message: 'Pick a Sumble list or provide a new list name' });
     }
-    if (!SUMBLE_API_KEY) return res.status(500).json({ status: 'error', message: 'SUMBLE_API_KEY not configured' });
+    const sumbleKey = await resolveSumbleKey(portalId);
+    if (!sumbleKey) return res.status(409).json({ status: 'error', message: 'Sumble isn\'t connected. Connect it in the app Settings.' });
 
     let listId = sumbleListId;
     let listUrl = null;
     let listName = null;
     if (newListName) {
       const cr = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, {
-        method: 'POST', headers: sumbleHeaders(), body: JSON.stringify({ name: newListName }),
+        method: 'POST', headers: sumbleHeaders(sumbleKey), body: JSON.stringify({ name: newListName }),
       });
       if (!cr.ok) {
         const e = await cr.json().catch(() => ({}));
@@ -552,7 +587,7 @@ app.post('/api/add-to-sumble-list', async (req, res) => {
 
     const uniqueSlugs = [...new Set(slugs.map((s) => String(s).trim()).filter(Boolean))];
     const ar = await fetch(`${SUMBLE_BASE}/v6/organization-lists/${listId}/organizations`, {
-      method: 'POST', headers: sumbleHeaders(), body: JSON.stringify({ organization_slugs: uniqueSlugs }),
+      method: 'POST', headers: sumbleHeaders(sumbleKey), body: JSON.stringify({ organization_slugs: uniqueSlugs }),
     });
     if (!ar.ok) {
       const e = await ar.json().catch(() => ({}));
@@ -568,6 +603,62 @@ app.post('/api/add-to-sumble-list', async (req, res) => {
   } catch (err) {
     console.error('[ADD TO LIST] error:', err.message);
     res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
+// ============================================================
+// Admin settings: connect Sumble (per-portal, encrypted at rest)
+// ============================================================
+const portalAllowed = (portalId) => !ALLOWED_PORTAL_ID || String(portalId) === String(ALLOWED_PORTAL_ID);
+const mask = (key) => (key && key.length >= 4 ? `••••${key.slice(-4)}` : '••••');
+
+// Connection status — never returns the key.
+app.get('/api/sumble-connection', async (req, res) => {
+  try {
+    const portalId = req.query.portalId;
+    let connected = false, masked = null, updatedAt = null, source = 'none';
+    if (portalId) {
+      const s = await db.getSecret(portalId).catch(() => null);
+      if (s && s.value) { connected = true; masked = mask(s.value); updatedAt = s.updatedAt; source = 'stored'; }
+    }
+    if (!connected && ENV_SUMBLE_KEY) { connected = true; masked = mask(ENV_SUMBLE_KEY); source = 'env'; }
+    res.json({ status: 'success', connected, masked, updatedAt, source, encryption: db.encryptionEnabled });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Connect / update: validate the key with Sumble, then store it encrypted.
+app.post('/api/sumble-connection', async (req, res) => {
+  try {
+    const { portalId, apiKey } = req.body;
+    if (!portalId) return res.status(400).json({ status: 'error', message: 'Missing portalId' });
+    if (!portalAllowed(portalId)) return res.status(403).json({ status: 'error', message: 'This portal is not allowed to configure the app.' });
+    if (!apiKey || !apiKey.trim()) return res.status(400).json({ status: 'error', message: 'Paste your Sumble API key' });
+    if (!db.encryptionEnabled) {
+      return res.status(500).json({ status: 'error', message: 'Backend encryption is not configured (set ENCRYPTION_KEY). Credentials are only stored encrypted.' });
+    }
+    const valid = await testSumbleKey(apiKey.trim());
+    if (!valid) return res.status(400).json({ status: 'error', message: 'Sumble rejected that key. Double-check it at sumble.com/account/api-keys.' });
+    await db.setSecret(portalId, apiKey.trim());
+    await db.setCached('global', 'sumble_lists', null); // bust list cache for the new key
+    res.json({ status: 'success', connected: true, masked: mask(apiKey.trim()) });
+  } catch (err) {
+    console.error('[CONNECT] error:', err.message);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Disconnect: remove the stored key for this portal.
+app.delete('/api/sumble-connection', async (req, res) => {
+  try {
+    const { portalId } = req.body || {};
+    if (!portalId) return res.status(400).json({ status: 'error', message: 'Missing portalId' });
+    if (!portalAllowed(portalId)) return res.status(403).json({ status: 'error', message: 'Not allowed.' });
+    await db.deleteSecret(portalId);
+    res.json({ status: 'success', connected: !!ENV_SUMBLE_KEY });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 

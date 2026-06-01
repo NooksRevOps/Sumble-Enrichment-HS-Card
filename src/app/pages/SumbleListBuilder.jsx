@@ -20,7 +20,8 @@ hubspot.extend(({ context }) => <SumbleListBuilder context={context} />);
 const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
 const NEW_LIST = "__new__";
 
-const SumbleListBuilder = () => {
+const SumbleListBuilder = ({ context }) => {
+  const portalId = context?.portal?.id;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [hubspotLists, setHubspotLists] = useState([]);
@@ -47,7 +48,7 @@ const SumbleListBuilder = () => {
     try {
       const [hs, sb] = await Promise.all([
         getJson("/api/hubspot-company-lists", { method: "GET" }),
-        getJson("/api/sumble-lists", { method: "GET" }),
+        getJson(`/api/sumble-lists?portalId=${encodeURIComponent(portalId || "")}`, { method: "GET" }),
       ]);
       setHubspotLists(hs.lists || []);
       setSumbleLists(sb.lists || []);
@@ -68,7 +69,7 @@ const SumbleListBuilder = () => {
     setSubmitError(null);
     setResult(null);
     try {
-      const body = { hubspotListId: sourceId };
+      const body = { hubspotListId: sourceId, portalId };
       if (targetId === NEW_LIST) body.newListName = newListName.trim();
       else body.sumbleListId = targetId;
       const json = await getJson("/api/push-to-sumble-list", { method: "POST", body });

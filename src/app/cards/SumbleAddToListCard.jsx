@@ -25,6 +25,7 @@ const listSearchUrl = (listId) =>
 const SumbleAddToListCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
+  const portalId = context?.portal?.id;
 
   const [loading, setLoading] = useState(true);
   const [slug, setSlug] = useState(null);
@@ -71,7 +72,7 @@ const SumbleAddToListCard = ({ actions }) => {
     setLoadingLists(true);
     setListsError(null);
     try {
-      const json = await getJson("/api/sumble-lists", { method: "GET" });
+      const json = await getJson(`/api/sumble-lists?portalId=${encodeURIComponent(portalId || "")}`, { method: "GET" });
       setLists(json.lists || []);
     } catch (err) {
       setListsError(err.message || "Couldn't load Sumble lists.");
@@ -85,7 +86,7 @@ const SumbleAddToListCard = ({ actions }) => {
     setError(null);
     setResult(null);
     try {
-      const body = { slugs: [slug] };
+      const body = { slugs: [slug], portalId };
       if (targetId === NEW_LIST) body.newListName = newListName.trim();
       else body.sumbleListId = targetId;
       const json = await getJson("/api/add-to-sumble-list", { method: "POST", body });

@@ -54,6 +54,7 @@ const RoleTag = ({ type }) =>
 const SumblePeopleCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
+  const portalId = context?.portal?.id;
 
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -64,7 +65,7 @@ const SumblePeopleCard = ({ actions }) => {
   const callBackend = async (path, cachedOnly) => {
     const resp = await hubspot.fetch(`${BACKEND_URL}${path}`, {
       method: "POST",
-      body: { companyId, want: "people", cachedOnly },
+      body: { companyId, want: "people", cachedOnly, portalId },
     });
     const json = await resp.json();
     if (json.status !== "success") throw new Error(json.message || "Backend error");

@@ -9,11 +9,18 @@ services:
     buildCommand: cd backend && npm install
     startCommand: cd backend && npm start
     envVars:
-      - key: SUMBLE_API_KEY
+      # Required: encrypts admin-connected Sumble keys at rest (any random string).
+      - key: ENCRYPTION_KEY
         sync: false
       - key: HUBSPOT_SERVICE_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false
+      # Optional single-tenant guard: only this HubSpot portal can connect/use Sumble.
+      - key: ALLOWED_PORTAL_ID
+        sync: false
+      # Optional fallback Sumble key — admins normally connect via the app Settings instead.
+      - key: SUMBLE_API_KEY
         sync: false
       - key: NODE_ENV
         value: production

@@ -95,6 +95,7 @@ const renderMarkdown = (md) => {
 const SumbleBriefCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
+  const portalId = context?.portal?.id;
 
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -105,7 +106,7 @@ const SumbleBriefCard = ({ actions }) => {
   const callBackend = async (path, cachedOnly) => {
     const resp = await hubspot.fetch(`${BACKEND_URL}${path}`, {
       method: "POST",
-      body: { companyId, want: "brief", cachedOnly },
+      body: { companyId, want: "brief", cachedOnly, portalId },
     });
     const json = await resp.json();
     if (json.status !== "success") throw new Error(json.message || "Backend error");

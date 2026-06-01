@@ -1,0 +1,7 @@
+{
+  "uid": "sumble-settings",
+  "type": "settings",
+  "config": {
+    "entrypoint": "/app/settings/SumbleSettings.jsx"
+  }
+}
