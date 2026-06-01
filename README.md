@@ -13,11 +13,12 @@ A private HubSpot app (project-based, platform 2025.2) that surfaces Sumble's en
 | **Sumble · Intelligence Brief** | middle column | Sumble's AI account brief (angle, who to contact, the intel, recent changes), rendered to formatted sections with clickable people links. Shows "Generated X ago" + manual refresh. | click-gated ("Generate"); ~50 / brief, cached until refreshed |
 | **Sumble · Add to List** | sidebar | Add **this** company to a Sumble organization list (existing or new), then open the filtered org-search view. | **0** to add; loading the list dropdown is ~1 / existing list (cached 5min) |
 
-### App page
+### App page + settings
 
-| Page | What it does | Credits |
+| Surface | What it does | Credits |
 |---|---|---|
 | **Add a HubSpot list to Sumble** (app home, Marketplace-icon nav) | Pick a HubSpot company list → bulk-add every member to a Sumble org list (by synced slug) → open the filtered org-search view. Companies without a Sumble match are skipped; Sumble de-dupes the rest. | **0** to create/add; ~1 / existing list to load the dropdown |
+| **Connect Sumble** (Connected Apps → Settings, admin-only) | An admin connects the team's Sumble account once — paste the key, it's validated against Sumble and stored **encrypted, per portal**. Every rep's cards then share that connection. No hardcoded key. | 0 |
 
 > **Why not iframe the Sumble page?** Sumble serves `X-Frame-Options: DENY` + `frame-ancestors 'none'`, a hard browser ban on embedding. So we pull data via Sumble's REST API and deep-link out.
 
@@ -45,25 +46,24 @@ The **Sales Org & Fit** card needs no backend (reads synced properties). The oth
 
 ## Setup
 
-### 1. Sumble API key
-Create at **sumble.com/account/api-keys**. Copy it (shown once).
-
-### 2. HubSpot Service Key
+### 1. HubSpot Service Key
 HubSpot **Settings → Integrations → Service Keys** → new key with scopes:
 - `crm.objects.companies.read` — read company props
 - `crm.lists.read` — read HubSpot lists (for the List Builder app page)
 
-### 3. Render env vars
+### 2. Render env vars
 On the `sumble-enrichment-backend` service → **Environment**:
-- `SUMBLE_API_KEY` = your Sumble key
+- `ENCRYPTION_KEY` = any random string (e.g. `openssl rand -hex 32`) — encrypts the stored Sumble key at rest. **Required to connect Sumble via the settings page.**
 - `HUBSPOT_SERVICE_KEY` = your HubSpot Service Key
 - `DATABASE_URL` = **"Add from Database" → sumble-enrichment-cache → Internal Database URL**
+- `ALLOWED_PORTAL_ID` (optional) = your HubSpot portal id — single-tenant guard so only your account can connect/use Sumble.
+- `SUMBLE_API_KEY` (optional) = a fallback key. Normally you connect Sumble via the settings page instead (below).
 
 Health check: `curl https://sumble-enrichment-backend.onrender.com/health`.
 
-> The backend runs without `DATABASE_URL` (non-durable in-memory cache), but set it so the cache survives restarts and protects credits.
+> The backend runs without `DATABASE_URL` (non-durable in-memory cache), but set it so the cache + stored key survive restarts.
 
-### 4. Install + place
+### 3. Install + place
 ```bash
 hs project install-deps
 hs project upload
@@ -71,6 +71,12 @@ hs project upload
 Then `hs project open` → **sumble-enrichment-app** → **Distribution → Install** (approve scopes).
 - **Cards:** open a company → **Customize record** → add the cards to the middle column (and "Add to List" to the sidebar).
 - **List Builder:** Marketplace-icon nav → **Sumble Enrichment** → app home.
+
+### 4. Connect Sumble (admin, once)
+Sumble is API-key only (no OAuth), so the connection is an API key entered via UI and stored server-side — the production-standard pattern for API-key products:
+- HubSpot **Connected Apps → Sumble Enrichment → Settings** → paste the Sumble key (from **sumble.com/account/api-keys**) → **Test & connect**.
+- The backend validates it with Sumble and stores it **encrypted, keyed by portal**. Every rep's cards then use it — no per-user setup, nothing hardcoded.
+- Key resolution at request time: stored per-portal key → `SUMBLE_API_KEY` env fallback. So the app keeps working on the env key until an admin connects.
 
 ## Backend API
 
@@ -82,7 +88,12 @@ Then `hs project open` → **sumble-enrichment-app** → **Distribution → Inst
 | `GET /api/hubspot-company-lists` | — | the account's COMPANY lists (List Builder source) |
 | `GET /api/sumble-lists` | — | existing Sumble org lists (cached 5min) |
 | `POST /api/push-to-sumble-list` | `{ hubspotListId, sumbleListId?\|newListName? }` | reads HubSpot list members → bulk-adds by slug → `{added, skippedNoSlug, listId}` |
-| `POST /api/add-to-sumble-list` | `{ slugs[], sumbleListId?\|newListName? }` | per-company add by slug |
+| `POST /api/add-to-sumble-list` | `{ slugs[], sumbleListId?\|newListName?, portalId }` | per-company add by slug |
+| `GET /api/sumble-connection` | `?portalId=` | connection status (connected, masked, source: stored\|env\|none) — never returns the key |
+| `POST /api/sumble-connection` | `{ portalId, apiKey }` | validate with Sumble + store encrypted (admin) |
+| `DELETE /api/sumble-connection` | `{ portalId }` | remove the stored key |
+
+All Sumble-calling endpoints take `portalId` so the backend resolves the per-portal stored key (→ `SUMBLE_API_KEY` env fallback).
 
 `cachedOnly` defaults true on `/api/enrichment` — auto-load never spends credits; the card sends `cachedOnly:false` on an explicit click.
 
