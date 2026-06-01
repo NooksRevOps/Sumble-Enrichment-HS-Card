@@ -4,7 +4,7 @@
   "config": {
     "name": "Sumble Enrichment",
     "description": "Surface Sumble enrichment depth (SDR seats, named people, intelligence brief) directly on the HubSpot company record.",
-    "logo": "logo.png",
+    "logo": "/app/logo.png",
     "distribution": "private",
     "auth": {
       "type": "static",
