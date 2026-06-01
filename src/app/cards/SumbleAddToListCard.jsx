@@ -124,7 +124,7 @@ const SumbleAddToListCard = ({ actions }) => {
           <Text inline format={{ fontWeight: "bold" }}>{result.listName}</Text>.
         </Alert>
         {result._url ? (
-          <Link href={{ url: result._url, external: true }}>Open the list in Sumble</Link>
+          <Link href={{ url: result._url, external: true }}>Open accounts in Sumble</Link>
         ) : null}
         <Button
           variant="secondary"

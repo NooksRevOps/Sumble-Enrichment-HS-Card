@@ -181,18 +181,19 @@ const SumbleListBuilder = () => {
         <Alert title="Done" variant="success">
           <Flex direction="column" gap="extra-small">
             <Text>
-              Added <Text inline format={{ fontWeight: "bold" }}>{result.added}</Text> of{" "}
+              Sent <Text inline format={{ fontWeight: "bold" }}>{result.withSlug}</Text> of{" "}
               {result.totalCompanies} companies
               {result.listName ? <> to <Text inline format={{ fontWeight: "bold" }}>{result.listName}</Text></> : null}.
               {result.skippedNoSlug > 0
-                ? ` ${result.skippedNoSlug} skipped (no Sumble match).`
+                ? ` ${result.skippedNoSlug} had no Sumble match and were skipped.`
                 : ""}
               {result.failed > 0 ? ` ${result.failed} failed.` : ""}
             </Text>
+            <Text variant="microcopy">
+              Sumble de-duplicates automatically — any companies already on the list aren't added twice.
+            </Text>
             {result._listUrl ? (
-              <Link href={{ url: result._listUrl, external: true }}>
-                Open this list in Sumble (org search, sorted by Sumble score)
-              </Link>
+              <Link href={{ url: result._listUrl, external: true }}>Open accounts in Sumble</Link>
             ) : null}
           </Flex>
         </Alert>
