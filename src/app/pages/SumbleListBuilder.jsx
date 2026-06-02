@@ -220,12 +220,12 @@ const SumbleListBuilder = ({ context }) => {
   }
 
   const sourceOptions = hubspotLists.map((l) => ({
-    label: l.size != null ? `${l.name} (${l.size})` : l.name,
+    label: l.size != null ? `${l.name} · ${Number(l.size).toLocaleString()}` : l.name,
     value: String(l.id),
   }));
   const targetOptions = [
     ...sumbleLists.map((l) => ({
-      label: l.count != null ? `${l.name} (${l.count})` : l.name,
+      label: l.count != null ? `${l.name} · ${Number(l.count).toLocaleString()}` : l.name,
       value: String(l.id),
     })),
     { label: "➕ Create a new list…", value: NEW_LIST },
@@ -247,7 +247,7 @@ const SumbleListBuilder = ({ context }) => {
       <Tile>
         <Flex direction="column" gap="medium">
           <Select
-            label="1 · HubSpot company list (source)"
+            label="1 · HubSpot company list"
             name="source"
             required={true}
             placeholder={sourceOptions.length ? "Choose a list…" : "No company lists found"}
@@ -257,7 +257,7 @@ const SumbleListBuilder = ({ context }) => {
           />
 
           <Select
-            label="2 · Sumble list (target)"
+            label="2 · Sumble list"
             name="target"
             required={true}
             placeholder="Choose or create…"
@@ -371,7 +371,7 @@ const SumbleListBuilder = ({ context }) => {
                 <StatisticsItem label="Enriched" number={fmtInt(po.matched)}>
                   <Text>{po.matchRate}% of all companies</Text>
                 </StatisticsItem>
-                <StatisticsItem label="Hiring SDRs (1mo)" number={fmtInt(po.hiringSdrCompanies)} />
+                <StatisticsItem label="Hiring SDRs" number={fmtInt(po.hiringSdrCompanies)} />
               </Statistics>
 
               {coverageBar(po.matched, po.totalCompanies, po.matchRate)}
@@ -383,7 +383,7 @@ const SumbleListBuilder = ({ context }) => {
                   <Statistics>
                     <StatisticsItem label="IC SDR seats" number={fmtInt(po.seatSums.icSdrTotal)} />
                     <StatisticsItem label="IC AE seats" number={fmtInt(po.seatSums.icAeTotal)} />
-                    <StatisticsItem label="IC sales (total)" number={fmtInt(po.seatSums.icSalesTotal)} />
+                    <StatisticsItem label="IC sales total" number={fmtInt(po.seatSums.icSalesTotal)} />
                     <StatisticsItem label="Avg account fit" number={fmtAvg(po.seatSums.avgFit)} />
                   </Statistics>
                   <Text variant="microcopy">Updated {formatWhen(po.seatSums.generatedAt)}</Text>
@@ -392,7 +392,7 @@ const SumbleListBuilder = ({ context }) => {
                 <LoadingSpinner label="Calculating seat totals…" />
               )}
 
-              {segmentChart(po.segments, "Sales segment distribution (portal-wide)")}
+              {segmentChart(po.segments, "Sales segment distribution")}
             </Flex>
           ) : null}
         </Flex>
@@ -435,13 +435,13 @@ const SumbleListBuilder = ({ context }) => {
               <Divider />
               <Statistics>
                 <StatisticsItem label="Companies" number={fmtInt(single.totalCompanies)}>
-                  <Text>{fmtInt(single.matched)} matched to Sumble ({single.matchRate}%)</Text>
+                  <Text>{fmtInt(single.matched)} matched to Sumble · {single.matchRate}%</Text>
                 </StatisticsItem>
                 <StatisticsItem label="IC SDR seats" number={fmtInt(single.icSdrTotal)} />
                 <StatisticsItem label="IC AE seats" number={fmtInt(single.icAeTotal)} />
-                <StatisticsItem label="IC sales (total)" number={fmtInt(single.icSalesTotal)} />
+                <StatisticsItem label="IC sales total" number={fmtInt(single.icSalesTotal)} />
                 <StatisticsItem label="Avg account fit" number={fmtAvg(single.avgFit)} />
-                <StatisticsItem label="Hiring SDRs (1mo)" number={fmtInt(single.hiringSdrCompanies)} />
+                <StatisticsItem label="Hiring SDRs" number={fmtInt(single.hiringSdrCompanies)} />
               </Statistics>
               {coverageBar(single.matched, single.totalCompanies, single.matchRate)}
               {segmentChart(single.segments)}

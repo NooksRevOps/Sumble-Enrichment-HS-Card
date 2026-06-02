@@ -130,7 +130,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
         <Flex direction="column" gap="small">
           <Statistics>
             <StatisticsItem label="Nooks Fit Score" number={fitScore === null ? "—" : fitScore} />
-            <StatisticsItem label="Employees (Sumble)" number={fmtInt(p.sumble_employee_count)}>
+            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
               {growth && growthN !== null ? (
                 <StatisticsTrend
                   value={`${growth} YoY`}

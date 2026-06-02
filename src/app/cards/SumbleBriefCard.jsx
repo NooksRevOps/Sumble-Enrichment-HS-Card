@@ -199,7 +199,7 @@ const SumbleBriefCard = ({ actions }) => {
             changes. Generating one uses ~50 Sumble credits, then it's cached until you refresh it.
           </Text>
           <LoadingButton loading={generating} onClick={() => generate("/api/enrichment")} variant="primary">
-            Generate brief (~50 credits)
+            Generate brief · ~50 credits
           </LoadingButton>
         </Flex>
       </Tile>
@@ -215,7 +215,7 @@ const SumbleBriefCard = ({ actions }) => {
         <Flex direction="row" gap="small" align="center">
           {ext(data?.briefSumbleUrl) ? <Link href={ext(data.briefSumbleUrl)}>Open in Sumble</Link> : null}
           <LoadingButton loading={generating} onClick={() => generate("/api/refresh")} variant="secondary" size="xs">
-            Refresh (~50 credits)
+            Refresh · ~50 credits
           </LoadingButton>
         </Flex>
       </Flex>

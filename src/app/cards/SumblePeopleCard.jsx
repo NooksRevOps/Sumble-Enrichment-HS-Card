@@ -140,19 +140,19 @@ const SumblePeopleCard = ({ actions }) => {
           You'll get the top SDRs first. If Sumble has fewer than 10 on record, we fill the rest with
           AEs — every row is tagged so you know which is which. If there are no SDRs or AEs at all, we
           show the company's SDR job postings from the last 12 months instead: they're staffing up, so
-          it's still worth prospecting. (≈1 credit per person, cached 30 days.)
+          it's still worth prospecting.
         </Text>
       </Flex>
 
       <Statistics>
-        <StatisticsItem label="Synced SDRs (HubSpot)" number={intOrDash(syncedCount)} />
-        {!notLoaded ? <StatisticsItem label="Live SDRs (Sumble)" number={intOrDash(liveCount)} /> : null}
+        <StatisticsItem label="Synced SDRs" number={intOrDash(syncedCount)} />
+        {!notLoaded ? <StatisticsItem label="Live SDRs" number={intOrDash(liveCount)} /> : null}
       </Statistics>
 
       {mismatch ? (
         <Alert title="Counts differ" variant="warning">
-          Synced ({intOrDash(syncedCount)}) ≠ Sumble live ({intOrDash(liveCount)}). Worth confirming
-          RevOps' seat sizing for this account.
+          HubSpot has {intOrDash(syncedCount)} synced; Sumble shows {intOrDash(liveCount)} live. Worth
+          confirming RevOps' seat sizing for this account.
         </Alert>
       ) : null}
 
@@ -163,9 +163,9 @@ const SumblePeopleCard = ({ actions }) => {
       {/* Gated: rep clicks to spend credits */}
       {notLoaded && !data?.peopleError ? (
         <EmptyState title="Confirm the seat count" imageName="contacts" layout="vertical">
-          <Text>Pull the top IC-SDR people (topped up with AEs) from Sumble to verify the synced figure.</Text>
+          <Text>Pull the top SDRs and AEs from Sumble to verify the synced figure.</Text>
           <LoadingButton loading={fetching} onClick={() => fetchLive("/api/enrichment")} variant="primary">
-            Load people (uses credits)
+            Load people · uses credits
           </LoadingButton>
         </EmptyState>
       ) : null}
@@ -259,7 +259,7 @@ const SumblePeopleCard = ({ actions }) => {
               <Link href={{ url: data.sdrDeepLinkUrl, external: true }}>View all SDRs in Sumble</Link>
             ) : <Text variant="microcopy"> </Text>}
             <LoadingButton loading={fetching} onClick={() => fetchLive("/api/refresh")} variant="secondary" size="xs">
-              Refresh (uses credits)
+              Refresh · uses credits
             </LoadingButton>
           </Flex>
         </>
