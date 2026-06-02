@@ -513,6 +513,71 @@ const numv = (v) => {
   return Number.isNaN(n) ? null : n;
 };
 
+// The synced HubSpot properties the reports aggregate. All Sumble-synced, so
+// reading them costs no Sumble credits.
+const SEGMENT_PROPS = [
+  'sumble_organization_slug',
+  'sumble_sdr_ic_people_count',
+  'sumble_ae_ic_people_count_people_count',
+  'estimated__ic_sales_team_sumble',
+  'account_score__nooks_',
+  'current_sales_segment_sumble',
+  'sumble_sdr_job_post_1mo_count',
+];
+
+// Aggregate a set of company property rows into the report shape. Shared by the
+// per-list segment report and the portal-wide overview.
+function aggregateCompanyRows(rows) {
+  let matched = 0, icSdr = 0, icAe = 0, icSales = 0, fitSum = 0, fitCount = 0, hiring = 0;
+  const segments = { COMM: 0, 'Mid-Market': 0, Enterprise: 0, Unknown: 0 };
+  for (const p of rows) {
+    if (p.sumble_organization_slug) matched += 1;
+    icSdr += numv(p.sumble_sdr_ic_people_count) || 0;
+    icAe += numv(p.sumble_ae_ic_people_count_people_count) || 0;
+    icSales += numv(p.estimated__ic_sales_team_sumble) || 0;
+    const fit = numv(p.account_score__nooks_);
+    if (fit !== null) { fitSum += fit; fitCount += 1; }
+    const seg = p.current_sales_segment_sumble;
+    if (seg && segments[seg] !== undefined) segments[seg] += 1; else segments.Unknown += 1;
+    if ((numv(p.sumble_sdr_job_post_1mo_count) || 0) > 0) hiring += 1;
+  }
+  const total = rows.length;
+  return {
+    totalCompanies: total,
+    matched,
+    matchRate: total ? Math.round((matched / total) * 100) : 0,
+    icSdrTotal: Math.round(icSdr),
+    icAeTotal: Math.round(icAe),
+    icSalesTotal: Math.round(icSales),
+    avgFit: fitCount ? Math.round((fitSum / fitCount) * 10) / 10 : null,
+    segments,
+    hiringSdrCompanies: hiring,
+  };
+}
+
+// Page EVERY company in the portal, reading `props`. Used by the portal-wide
+// overview (which needs true seat sums, not just counts). Bounded by a safety
+// cap so a huge portal can't run unbounded.
+const MAX_PORTAL_COMPANIES = 100000; // 1000 pages of 100 — safety bound
+async function readAllCompanyProps(props, cap = MAX_PORTAL_COMPANIES) {
+  const out = [];
+  let after = null;
+  do {
+    const url = `https://api.hubapi.com/crm/v3/objects/companies?limit=100&properties=${encodeURIComponent(props.join(','))}${after ? `&after=${after}` : ''}`;
+    const resp = await fetch(url, { headers: hubspotHeaders() });
+    if (!resp.ok) {
+      const e = await resp.json().catch(() => ({}));
+      const err = new Error(e.message || 'Failed to page companies');
+      err.status = resp.status;
+      throw err;
+    }
+    const data = await resp.json();
+    for (const c of data.results || []) out.push(c.properties || {});
+    after = data.paging?.next?.after || null;
+  } while (after && out.length < cap);
+  return out;
+}
+
 // Feature 1+2: segment SDR-seat report + Sumble coverage, aggregated from the
 // SYNCED HubSpot properties across a list's members. No Sumble API calls — free.
 app.post('/api/segment-report', async (req, res) => {
@@ -520,41 +585,10 @@ app.post('/api/segment-report', async (req, res) => {
     const { hubspotListId } = req.body;
     if (!hubspotListId) return res.status(400).json({ status: 'error', message: 'Missing hubspotListId' });
     const memberIds = await getHubspotListMemberIds(hubspotListId);
-    const rows = await batchReadCompanyProps(memberIds, [
-      'sumble_organization_slug',
-      'sumble_sdr_ic_people_count',
-      'sumble_ae_ic_people_count_people_count',
-      'estimated__ic_sales_team_sumble',
-      'account_score__nooks_',
-      'current_sales_segment_sumble',
-      'sumble_sdr_job_post_1mo_count',
-    ]);
-
-    let matched = 0, icSdr = 0, icAe = 0, icSales = 0, fitSum = 0, fitCount = 0, hiring = 0;
-    const segments = { COMM: 0, 'Mid-Market': 0, Enterprise: 0, Unknown: 0 };
-    for (const p of rows) {
-      if (p.sumble_organization_slug) matched += 1;
-      icSdr += numv(p.sumble_sdr_ic_people_count) || 0;
-      icAe += numv(p.sumble_ae_ic_people_count_people_count) || 0;
-      icSales += numv(p.estimated__ic_sales_team_sumble) || 0;
-      const fit = numv(p.account_score__nooks_);
-      if (fit !== null) { fitSum += fit; fitCount += 1; }
-      const seg = p.current_sales_segment_sumble;
-      if (seg && segments[seg] !== undefined) segments[seg] += 1; else if (seg) segments.Unknown += 1; else segments.Unknown += 1;
-      if ((numv(p.sumble_sdr_job_post_1mo_count) || 0) > 0) hiring += 1;
-    }
-    const total = rows.length;
+    const rows = await batchReadCompanyProps(memberIds, SEGMENT_PROPS);
     res.json({
       status: 'success',
-      totalCompanies: total,
-      matched,
-      matchRate: total ? Math.round((matched / total) * 100) : 0,
-      icSdrTotal: Math.round(icSdr),
-      icAeTotal: Math.round(icAe),
-      icSalesTotal: Math.round(icSales),
-      avgFit: fitCount ? Math.round((fitSum / fitCount) * 10) / 10 : null,
-      segments,
-      hiringSdrCompanies: hiring,
+      ...aggregateCompanyRows(rows),
       capped: memberIds.length >= MAX_LIST_COMPANIES,
     });
   } catch (err) {
@@ -562,6 +596,114 @@ app.post('/api/segment-report', async (req, res) => {
     res.status(err.status || 500).json({ status: 'error', message: err.message });
   }
 });
+
+// Company COUNT for a search filter, read from the `total` the search API
+// returns (no record paging). Used for instant portal-wide counts.
+async function searchCompanyTotal(filterGroups) {
+  const resp = await fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
+    method: 'POST',
+    headers: hubspotHeaders(),
+    body: JSON.stringify({ filterGroups: filterGroups || [], limit: 1, properties: ['hs_object_id'] }),
+  });
+  if (!resp.ok) {
+    const e = await resp.json().catch(() => ({}));
+    const err = new Error(e.message || 'Company search failed');
+    err.status = resp.status;
+    throw err;
+  }
+  return (await resp.json()).total ?? 0;
+}
+
+// Page EVERY company and cache the portal-wide seat SUMS. HubSpot has no
+// server-side SUM, so this is the only way to total seats across all 77k+
+// companies — too slow for a request, so it runs on a nightly in-process timer
+// (the web service is always-on) and a one-time bootstrap on first deploy.
+async function computeAndCachePortalSeatSums() {
+  const startedAt = Date.now();
+  const rows = await readAllCompanyProps(SEGMENT_PROPS);
+  const agg = aggregateCompanyRows(rows);
+  const payload = {
+    icSdrTotal: agg.icSdrTotal,
+    icAeTotal: agg.icAeTotal,
+    icSalesTotal: agg.icSalesTotal,
+    avgFit: agg.avgFit,
+    totalScanned: agg.totalCompanies,
+    capped: rows.length >= MAX_PORTAL_COMPANIES,
+    generatedAt: new Date().toISOString(),
+  };
+  await db.setCached('global', 'portal_seat_sums', payload);
+  console.log(`[SEAT SUMS] cached ${payload.totalScanned} companies in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+  return payload;
+}
+
+// Portal-wide overview: live counts (instant, via search totals) merged with the
+// nightly-cached seat sums. No Sumble credits — synced HubSpot props only.
+app.get('/api/portal-overview', async (_req, res) => {
+  try {
+    // Sequential to stay under the search API's per-second limit.
+    const total = await searchCompanyTotal([]);
+    const matched = await searchCompanyTotal([{ filters: [{ propertyName: 'sumble_organization_slug', operator: 'HAS_PROPERTY' }] }]);
+    const comm = await searchCompanyTotal([{ filters: [{ propertyName: 'current_sales_segment_sumble', operator: 'EQ', value: 'COMM' }] }]);
+    const mm = await searchCompanyTotal([{ filters: [{ propertyName: 'current_sales_segment_sumble', operator: 'EQ', value: 'Mid-Market' }] }]);
+    const ent = await searchCompanyTotal([{ filters: [{ propertyName: 'current_sales_segment_sumble', operator: 'EQ', value: 'Enterprise' }] }]);
+    const hiring = await searchCompanyTotal([{ filters: [{ propertyName: 'sumble_sdr_job_post_1mo_count', operator: 'GT', value: '0' }] }]);
+
+    const seat = await db.getCached('global', 'portal_seat_sums', Infinity);
+    res.json({
+      status: 'success',
+      totalCompanies: total,
+      matched,
+      matchRate: total ? Math.round((matched / total) * 100) : 0,
+      segments: { COMM: comm, 'Mid-Market': mm, Enterprise: ent, Unknown: Math.max(0, total - comm - mm - ent) },
+      hiringSdrCompanies: hiring,
+      seatSums: seat
+        ? {
+            icSdrTotal: seat.icSdrTotal,
+            icAeTotal: seat.icAeTotal,
+            icSalesTotal: seat.icSalesTotal,
+            avgFit: seat.avgFit,
+            scanned: seat.totalScanned,
+            generatedAt: seat.generatedAt,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error('[PORTAL OVERVIEW] error:', err.message);
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Nightly seat-sums refresh, in-process (starter plan is always-on, so no
+// external cron is needed). Fires at ~2am Pacific, then every 24h.
+const SEAT_SUMS_HOUR_UTC = 9; // ~02:00 America/Los_Angeles
+function msUntilNextSeatSumsRun() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(SEAT_SUMS_HOUR_UTC, 0, 0, 0);
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  return next - now;
+}
+function scheduleNightlySeatSums() {
+  const runNightly = () =>
+    computeAndCachePortalSeatSums().catch((e) => console.error('[SEAT SUMS] nightly failed:', e.message));
+  setTimeout(() => {
+    runNightly();
+    setInterval(runNightly, 24 * 60 * 60 * 1000);
+  }, msUntilNextSeatSumsRun());
+}
+// First deploy: if there's no cached value yet, build it once in the background
+// so the overview isn't empty until the first nightly run.
+async function bootstrapSeatSums() {
+  try {
+    const existing = await db.getCached('global', 'portal_seat_sums', Infinity);
+    if (!existing) {
+      console.log('[SEAT SUMS] no cache yet — bootstrapping in background');
+      computeAndCachePortalSeatSums().catch((e) => console.error('[SEAT SUMS] bootstrap failed:', e.message));
+    }
+  } catch (e) {
+    console.error('[SEAT SUMS] bootstrap check failed:', e.message);
+  }
+}
 
 // Feature 3: recent push activity log.
 app.get('/api/push-log', async (req, res) => {
@@ -765,4 +907,6 @@ db.init()
   .catch((err) => console.error('[STARTUP] db.init failed (continuing):', err.message))
   .finally(() => {
     app.listen(PORT, () => console.log(`Sumble backend listening on ${PORT}`));
+    bootstrapSeatSums();        // build portal seat sums once if never built
+    scheduleNightlySeatSums();  // refresh nightly thereafter
   });

@@ -6,6 +6,7 @@ import {
   Tile,
   Divider,
   Select,
+  MultiSelect,
   Input,
   Button,
   LoadingButton,
@@ -16,6 +17,8 @@ import {
   Tab,
   Statistics,
   StatisticsItem,
+  ProgressBar,
+  BarChart,
   Table,
   TableHead,
   TableRow,
@@ -49,11 +52,20 @@ const SumbleListBuilder = ({ context }) => {
   const [result, setResult] = useState(null);
   const [submitError, setSubmitError] = useState(null);
 
-  // ----- Segment report tab -----
-  const [segListId, setSegListId] = useState("");
-  const [segLoading, setSegLoading] = useState(false);
-  const [segReport, setSegReport] = useState(null);
-  const [segError, setSegError] = useState(null);
+  // ----- Reporting tab: which sub-view is active (for lazy portal load) -----
+  const [activeTab, setActiveTab] = useState("build");
+
+  // ----- Reporting: portal-wide overview (live counts + nightly seat sums) -----
+  const [poLoading, setPoLoading] = useState(false);
+  const [portalOverview, setPortalOverview] = useState(null);
+  const [poError, setPoError] = useState(null);
+
+  // ----- Reporting: list analysis (1 list = deep-dive, 2-5 = compare) -----
+  const MAX_COMPARE = 5;
+  const [analysisListIds, setAnalysisListIds] = useState([]);
+  const [laLoading, setLaLoading] = useState(false);
+  const [listReports, setListReports] = useState(null); // [{ id, name, report }]
+  const [laError, setLaError] = useState(null);
 
   // ----- Recent activity tab -----
   const [logLoading, setLogLoading] = useState(true);
@@ -147,21 +159,47 @@ const SumbleListBuilder = ({ context }) => {
     }
   };
 
-  const runSegmentReport = async () => {
-    setSegLoading(true);
-    setSegError(null);
-    setSegReport(null);
+  const loadPortalOverview = async () => {
+    setPoLoading(true);
+    setPoError(null);
     try {
-      const json = await getJson("/api/segment-report", {
-        method: "POST",
-        body: { hubspotListId: segListId, portalId },
-      });
-      setSegReport(json);
+      const json = await getJson("/api/portal-overview", { method: "GET" });
+      setPortalOverview(json);
     } catch (err) {
-      console.error("[ListBuilder] segment report error:", err);
-      setSegError(err.message || "Couldn't build the segment report.");
+      console.error("[ListBuilder] portal overview error:", err);
+      setPoError(err.message || "Couldn't load the portal overview.");
     } finally {
-      setSegLoading(false);
+      setPoLoading(false);
+    }
+  };
+
+  // Lazy-load the portal overview the first time the Reporting tab is opened.
+  const onTabChange = (id) => {
+    setActiveTab(id);
+    if (id === "reporting" && !portalOverview && !poLoading) loadPortalOverview();
+  };
+
+  const runListAnalysis = async () => {
+    const ids = analysisListIds.slice(0, MAX_COMPARE);
+    if (ids.length === 0) return;
+    setLaLoading(true);
+    setLaError(null);
+    setListReports(null);
+    try {
+      const reports = [];
+      for (const id of ids) {
+        const json = await getJson("/api/segment-report", {
+          method: "POST",
+          body: { hubspotListId: id, portalId },
+        });
+        reports.push({ id, name: hubspotListName(id) || `List ${id}`, report: json });
+      }
+      setListReports(reports);
+    } catch (err) {
+      console.error("[ListBuilder] list analysis error:", err);
+      setLaError(err.message || "Couldn't build the report.");
+    } finally {
+      setLaLoading(false);
     }
   };
 
@@ -275,72 +313,192 @@ const SumbleListBuilder = ({ context }) => {
     </Flex>
   );
 
-  // ------------------------------------------------------- Segment report tab
-  const segmentTab = (
-    <Flex direction="column" gap="medium">
-      <Text variant="microcopy">
-        Aggregate the synced Sumble fields across a HubSpot company list — sellable-seat totals and
-        Sumble match coverage. Reads only synced HubSpot properties, so it uses no Sumble credits.
-      </Text>
+  // ------------------------------------------------------------- Reporting tab
+  // Shared renderers (used by both the portal overview and per-list deep-dive).
+  const coverageBar = (matched, total, rate) => (
+    <ProgressBar
+      title="Sumble match coverage"
+      value={matched}
+      maxValue={total || 1}
+      showPercentage={true}
+      valueDescription={`${fmtInt(matched)} of ${fmtInt(total)} companies matched to Sumble`}
+      variant={rate >= 80 ? "success" : rate >= 50 ? "warning" : "danger"}
+    />
+  );
+  const segmentChart = (segments, title) => (
+    <BarChart
+      data={[
+        { segment: "COMM", companies: segments?.COMM ?? 0 },
+        { segment: "Mid-Market", companies: segments?.["Mid-Market"] ?? 0 },
+        { segment: "Enterprise", companies: segments?.Enterprise ?? 0 },
+        { segment: "Unknown", companies: segments?.Unknown ?? 0 },
+      ]}
+      axes={{
+        x: { field: "segment", fieldType: "category", label: "Sales segment" },
+        y: { field: "companies", fieldType: "linear", label: "Companies" },
+      }}
+      options={{ title: title || "Sales segment distribution", showDataLabels: true }}
+    />
+  );
 
+  const po = portalOverview;
+  const single = listReports && listReports.length === 1 ? listReports[0].report : null;
+  const compare = listReports && listReports.length > 1 ? listReports : null;
+
+  const reportingTab = (
+    <Flex direction="column" gap="medium">
+      {/* ---- Portal-wide overview ---- */}
       <Tile>
         <Flex direction="column" gap="medium">
-          <Select
-            label="HubSpot company list"
-            name="segSource"
-            required={true}
-            placeholder={sourceOptions.length ? "Choose a list…" : "No company lists found"}
-            options={sourceOptions}
-            value={segListId}
-            onChange={(v) => setSegListId(v)}
-          />
-          <Flex direction="row" gap="small" align="center">
-            <LoadingButton
-              loading={segLoading}
-              disabled={!segListId || segLoading}
-              onClick={runSegmentReport}
-              variant="primary"
-            >
-              Run report
-            </LoadingButton>
+          <Flex direction="row" justify="between" align="center">
+            <Heading>Portal overview</Heading>
+            <Button onClick={loadPortalOverview} variant="secondary" disabled={poLoading} size="extra-small">
+              Refresh
+            </Button>
           </Flex>
+          <Text variant="microcopy">
+            Every company in the portal. Counts are live; seat sums refresh nightly (HubSpot can’t total
+            77k+ companies on demand). No Sumble credits — synced HubSpot properties only.
+          </Text>
+
+          {poError ? <Alert title="Couldn't load overview" variant="error">{poError}</Alert> : null}
+
+          {poLoading && !po ? (
+            <LoadingSpinner label="Counting companies across the portal..." />
+          ) : po ? (
+            <Flex direction="column" gap="medium">
+              <Statistics>
+                <StatisticsItem label="Companies" number={fmtInt(po.totalCompanies)} />
+                <StatisticsItem label="Enriched" number={fmtInt(po.matched)}>
+                  <Text>{po.matchRate}% of all companies</Text>
+                </StatisticsItem>
+                <StatisticsItem label="Hiring SDRs (1mo)" number={fmtInt(po.hiringSdrCompanies)} />
+              </Statistics>
+
+              {coverageBar(po.matched, po.totalCompanies, po.matchRate)}
+
+              <Divider />
+
+              {po.seatSums ? (
+                <Flex direction="column" gap="extra-small">
+                  <Statistics>
+                    <StatisticsItem label="IC SDR seats" number={fmtInt(po.seatSums.icSdrTotal)} />
+                    <StatisticsItem label="IC AE seats" number={fmtInt(po.seatSums.icAeTotal)} />
+                    <StatisticsItem label="IC sales (total)" number={fmtInt(po.seatSums.icSalesTotal)} />
+                    <StatisticsItem label="Avg account fit" number={fmtAvg(po.seatSums.avgFit)} />
+                  </Statistics>
+                  <Text variant="microcopy">
+                    Seat sums across {fmtInt(po.seatSums.scanned)} companies · as of {formatWhen(po.seatSums.generatedAt)}
+                  </Text>
+                </Flex>
+              ) : (
+                <Alert title="Seat sums pending" variant="info">
+                  The portal-wide seat totals are being built for the first time (it pages every company).
+                  Check back shortly, then hit Refresh.
+                </Alert>
+              )}
+
+              {segmentChart(po.segments, "Sales segment distribution (portal-wide)")}
+            </Flex>
+          ) : null}
         </Flex>
       </Tile>
 
-      {segError ? <Alert title="Couldn't build the report" variant="error">{segError}</Alert> : null}
+      {/* ---- Per-list deep-dive / multi-list compare ---- */}
+      <Tile>
+        <Flex direction="column" gap="medium">
+          <Heading>List analysis</Heading>
+          <Text variant="microcopy">
+            Pick one list for a deep-dive, or up to {MAX_COMPARE} to compare seat totals and coverage
+            side by side. Reads synced HubSpot properties only — no Sumble credits.
+          </Text>
 
-      {segReport ? (
-        <Tile>
-          <Flex direction="column" gap="medium">
-            <Statistics>
-              <StatisticsItem label="Companies" number={segReport.totalCompanies}>
-                <Text>{segReport.matched} matched to Sumble ({segReport.matchRate}%)</Text>
-              </StatisticsItem>
-              <StatisticsItem label="IC SDR seats" number={segReport.icSdrTotal} />
-              <StatisticsItem label="IC AE seats" number={segReport.icAeTotal} />
-              <StatisticsItem label="IC sales (total)" number={segReport.icSalesTotal} />
-              <StatisticsItem label="Avg account fit" number={segReport.avgFit ?? "—"} />
-              <StatisticsItem label="Hiring SDRs (1mo)" number={segReport.hiringSdrCompanies} />
-            </Statistics>
-
-            <Divider />
-
-            <Flex direction="column" gap="extra-small">
-              <Text format={{ fontWeight: "bold" }}>Sales segment distribution</Text>
-              <Text variant="microcopy">
-                COMM {segReport.segments?.COMM ?? 0} · Mid-Market {segReport.segments?.["Mid-Market"] ?? 0}
-                {" "}· Enterprise {segReport.segments?.Enterprise ?? 0} · Unknown {segReport.segments?.Unknown ?? 0}
-              </Text>
-            </Flex>
-
-            {segReport.capped ? (
-              <Alert title="List truncated" variant="warning">
-                This list is large — only the first 1,000 companies were aggregated.
-              </Alert>
+          <MultiSelect
+            label="HubSpot company list(s)"
+            name="analysisLists"
+            placeholder={sourceOptions.length ? "Choose one or more lists…" : "No company lists found"}
+            options={sourceOptions}
+            value={analysisListIds}
+            onChange={(v) => setAnalysisListIds(v)}
+          />
+          <Flex direction="row" gap="small" align="center">
+            <LoadingButton
+              loading={laLoading}
+              disabled={analysisListIds.length === 0 || laLoading}
+              onClick={runListAnalysis}
+              variant="primary"
+            >
+              {analysisListIds.length > 1 ? "Compare lists" : "Run report"}
+            </LoadingButton>
+            {analysisListIds.length > MAX_COMPARE ? (
+              <Text variant="microcopy">Only the first {MAX_COMPARE} will be compared.</Text>
             ) : null}
           </Flex>
-        </Tile>
-      ) : null}
+
+          {laError ? <Alert title="Couldn't build the report" variant="error">{laError}</Alert> : null}
+
+          {single ? (
+            <Flex direction="column" gap="medium">
+              <Divider />
+              <Statistics>
+                <StatisticsItem label="Companies" number={fmtInt(single.totalCompanies)}>
+                  <Text>{fmtInt(single.matched)} matched to Sumble ({single.matchRate}%)</Text>
+                </StatisticsItem>
+                <StatisticsItem label="IC SDR seats" number={fmtInt(single.icSdrTotal)} />
+                <StatisticsItem label="IC AE seats" number={fmtInt(single.icAeTotal)} />
+                <StatisticsItem label="IC sales (total)" number={fmtInt(single.icSalesTotal)} />
+                <StatisticsItem label="Avg account fit" number={fmtAvg(single.avgFit)} />
+                <StatisticsItem label="Hiring SDRs (1mo)" number={fmtInt(single.hiringSdrCompanies)} />
+              </Statistics>
+              {coverageBar(single.matched, single.totalCompanies, single.matchRate)}
+              {segmentChart(single.segments)}
+              {single.capped ? (
+                <Alert title="List truncated" variant="warning">
+                  This list is large — only the first 1,000 companies were aggregated.
+                </Alert>
+              ) : null}
+            </Flex>
+          ) : null}
+
+          {compare ? (
+            <Flex direction="column" gap="medium">
+              <Divider />
+              <Table bordered={true} density="condensed">
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>List</TableHeader>
+                    <TableHeader align="right">Companies</TableHeader>
+                    <TableHeader align="right">Match %</TableHeader>
+                    <TableHeader align="right">IC SDR</TableHeader>
+                    <TableHeader align="right">IC AE</TableHeader>
+                    <TableHeader align="right">IC total</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {compare.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>{r.name}</TableCell>
+                      <TableCell align="right">{fmtInt(r.report.totalCompanies)}</TableCell>
+                      <TableCell align="right">{r.report.matchRate}%</TableCell>
+                      <TableCell align="right">{fmtInt(r.report.icSdrTotal)}</TableCell>
+                      <TableCell align="right">{fmtInt(r.report.icAeTotal)}</TableCell>
+                      <TableCell align="right">{fmtInt(r.report.icSalesTotal)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <BarChart
+                data={compare.map((r) => ({ list: r.name, seats: r.report.icSalesTotal }))}
+                axes={{
+                  x: { field: "list", fieldType: "category", label: "List" },
+                  y: { field: "seats", fieldType: "linear", label: "IC sales seats" },
+                }}
+                options={{ title: "IC sales seats by list", showDataLabels: true }}
+              />
+            </Flex>
+          ) : null}
+        </Flex>
+      </Tile>
     </Flex>
   );
 
@@ -401,14 +559,30 @@ const SumbleListBuilder = ({ context }) => {
         ) : null}
       </Flex>
 
-      <Tabs defaultSelected="build">
+      <Tabs selected={activeTab} onSelectedChange={onTabChange}>
         <Tab tabId="build" title="Build list">{buildTab}</Tab>
-        <Tab tabId="segment" title="Segment report">{segmentTab}</Tab>
+        <Tab tabId="reporting" title="Reporting">{reportingTab}</Tab>
         <Tab tabId="activity" title="Recent activity">{activityTab}</Tab>
       </Tabs>
     </Flex>
   );
 };
+
+// Whole number with thousands separators (e.g. 13009 -> "13,009"). "—" if null.
+function fmtInt(n) {
+  if (n == null || n === "") return "—";
+  const v = Number(n);
+  return Number.isNaN(v) ? "—" : Math.round(v).toLocaleString();
+}
+
+// Average kept to one decimal (e.g. 37.6). "—" if null.
+function fmtAvg(n) {
+  if (n == null || n === "") return "—";
+  const v = Number(n);
+  return Number.isNaN(v)
+    ? "—"
+    : v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
 
 // Render an ISO timestamp as a short, locale-free "YYYY-MM-DD HH:MM" string.
 function formatWhen(iso) {
