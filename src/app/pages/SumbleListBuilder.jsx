@@ -357,8 +357,7 @@ const SumbleListBuilder = ({ context }) => {
             </Button>
           </Flex>
           <Text variant="microcopy">
-            Every company in the portal. Counts are live; seat sums refresh nightly (HubSpot can’t total
-            77k+ companies on demand). No Sumble credits — synced HubSpot properties only.
+            Sellable seats and Sumble coverage across all of your companies.
           </Text>
 
           {poError ? <Alert title="Couldn't load overview" variant="error">{poError}</Alert> : null}
@@ -387,15 +386,10 @@ const SumbleListBuilder = ({ context }) => {
                     <StatisticsItem label="IC sales (total)" number={fmtInt(po.seatSums.icSalesTotal)} />
                     <StatisticsItem label="Avg account fit" number={fmtAvg(po.seatSums.avgFit)} />
                   </Statistics>
-                  <Text variant="microcopy">
-                    Seat sums across {fmtInt(po.seatSums.scanned)} companies · as of {formatWhen(po.seatSums.generatedAt)}
-                  </Text>
+                  <Text variant="microcopy">Updated {formatWhen(po.seatSums.generatedAt)}</Text>
                 </Flex>
               ) : (
-                <Alert title="Seat sums pending" variant="info">
-                  The portal-wide seat totals are being built for the first time (it pages every company).
-                  Check back shortly, then hit Refresh.
-                </Alert>
+                <LoadingSpinner label="Calculating seat totals…" />
               )}
 
               {segmentChart(po.segments, "Sales segment distribution (portal-wide)")}
@@ -409,8 +403,7 @@ const SumbleListBuilder = ({ context }) => {
         <Flex direction="column" gap="medium">
           <Heading>List analysis</Heading>
           <Text variant="microcopy">
-            Pick one list for a deep-dive, or up to {MAX_COMPARE} to compare seat totals and coverage
-            side by side. Reads synced HubSpot properties only — no Sumble credits.
+            Break down a single list, or pick several to compare side by side.
           </Text>
 
           <MultiSelect
@@ -453,8 +446,8 @@ const SumbleListBuilder = ({ context }) => {
               {coverageBar(single.matched, single.totalCompanies, single.matchRate)}
               {segmentChart(single.segments)}
               {single.capped ? (
-                <Alert title="List truncated" variant="warning">
-                  This list is large — only the first 1,000 companies were aggregated.
+                <Alert title="Showing first 1,000" variant="warning">
+                  This list has more than 1,000 companies; showing the first 1,000.
                 </Alert>
               ) : null}
             </Flex>
