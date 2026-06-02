@@ -36,10 +36,10 @@ Backend resolves the Sumble key per request: **stored per-portal key (encrypted,
 ## Credit safeguards
 API cards are **click-gated** (viewing a record spends nothing). Durable Postgres cache: people 30d, brief until manual refresh, org match 30d, sumble-lists 5min. Create/add-to-list are free.
 
-## ⏳ CURRENT IN-FLIGHT STATE (as of commit 5324f62)
-Building home-page features 1–4 (user approved; chat copilot deferred). Status:
+## ⏳ CURRENT IN-FLIGHT STATE
+Home-page features 1–4 **done**. Status:
 - ✅ **Backend done & committed (5324f62), deploys on push:** `/api/segment-report` (feat 1+2, free synced-prop aggregate: total/matched/match-rate/IC SDR+AE+total sums/avg fit/segment dist/hiring count), push log (feat 3), credit capture (feat 4).
-- ⬜ **NOT done — the home-page dashboard UI** that consumes these. Plan: restructure `SumbleListBuilder.jsx` into `Tabs` — "Build list" (existing) / "Segment report" (call `/api/segment-report` for the chosen HubSpot list; show seat totals + coverage) / "Recent activity" (`/api/push-log`); show `creditsRemaining` in the header. Pass `portalId` everywhere. The list builder should also send `hubspotListName` + `sumbleListName` to `/api/push-to-sumble-list` so the log is readable.
+- ✅ **Home-page dashboard UI done (deployed build #20).** `SumbleListBuilder.jsx` is now a 3-tab dashboard with a credits header — "Build list" (existing push flow; now also sends `hubspotListName` + `sumbleListName` so the log reads with real names, and refreshes the log after a push) / "Segment report" (`/api/segment-report` → `Statistics` block: companies+match rate, IC SDR/AE/total seats, avg fit, hiring SDRs, segment distribution, capped warning) / "Recent activity" (`/api/push-log` → `Table` + `EmptyState`). `creditsRemaining` captured free from `/api/sumble-lists` and shown in the header. `portalId` threaded through every call.
 - ⬜ **Feature 6 (custom workflow action "Flag SDR-seat mismatch")** — NOT started. First verify the 2025.2 `workflow-actions` component format (see `HubSpot/hubspot-project-components` repo, `2025.2/components/workflow-actions`) AND that the portal's hub tier supports custom workflow actions. It's inherently opt-in (toggleable). Build only if viable; else report back.
 - 🔭 **Chat "Sumble copilot" — deferred, needs decisions** (own LLM provider + key, per-question/daily cost+credit ceiling, card vs home placement). Not in current scope.
 
