@@ -67,7 +67,54 @@ async function init() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_log (
+      id            bigserial   PRIMARY KEY,
+      portal_id     text,
+      hubspot_list  text,
+      sumble_list   text,
+      total         integer,
+      added         integer,
+      skipped       integer,
+      created_at    timestamptz NOT NULL DEFAULT now()
+    );
+  `);
   console.log(`[DB] tables ready (Postgres). Encryption: ${encKey ? 'on' : 'OFF (set ENCRYPTION_KEY)'}`);
+}
+
+const pushMemory = []; // in-memory fallback for push log
+
+async function logPush(entry) {
+  const e = {
+    portal_id: entry.portalId ? String(entry.portalId) : null,
+    hubspot_list: entry.hubspotList || null,
+    sumble_list: entry.sumbleList || null,
+    total: entry.total ?? null,
+    added: entry.added ?? null,
+    skipped: entry.skipped ?? null,
+  };
+  if (!pool) {
+    pushMemory.unshift({ ...e, created_at: new Date().toISOString() });
+    if (pushMemory.length > 100) pushMemory.length = 100;
+    return;
+  }
+  await pool.query(
+    `INSERT INTO push_log (portal_id, hubspot_list, sumble_list, total, added, skipped)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [e.portal_id, e.hubspot_list, e.sumble_list, e.total, e.added, e.skipped]
+  );
+}
+
+async function getPushLog(portalId, limit = 20) {
+  if (!pool) {
+    return pushMemory.filter((r) => !portalId || r.portal_id === String(portalId)).slice(0, limit);
+  }
+  const { rows } = await pool.query(
+    `SELECT hubspot_list, sumble_list, total, added, skipped, created_at
+     FROM push_log WHERE ($1::text IS NULL OR portal_id = $1) ORDER BY created_at DESC LIMIT $2`,
+    [portalId ? String(portalId) : null, limit]
+  );
+  return rows;
 }
 
 // ---- per-portal encrypted secret store (the Sumble API key) ----
@@ -137,4 +184,4 @@ async function setCached(orgKey, section, payload) {
   );
 }
 
-module.exports = { init, getCached, setCached, setSecret, getSecret, deleteSecret, encryptionEnabled };
+module.exports = { init, getCached, setCached, setSecret, getSecret, deleteSecret, encryptionEnabled, logPush, getPushLog };

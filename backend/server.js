@@ -422,8 +422,12 @@ app.get('/api/sumble-lists', async (req, res) => {
   try {
     const sumbleKey = await resolveSumbleKey(req.query.portalId);
     if (!sumbleKey) return res.status(409).json({ status: 'error', message: 'Sumble isn\'t connected. Connect it in the app Settings.' });
-    let lists = await db.getCached('global', 'sumble_lists', SUMBLE_LISTS_TTL_MS);
-    if (!lists) {
+    let cached = await db.getCached('global', 'sumble_lists', SUMBLE_LISTS_TTL_MS);
+    let lists, creditsRemaining;
+    if (cached) {
+      lists = cached.lists;
+      creditsRemaining = cached.creditsRemaining ?? null;
+    } else {
       const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders(sumbleKey) });
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
@@ -436,9 +440,10 @@ app.get('/api/sumble-lists', async (req, res) => {
         url: l.url || null,
         count: l.organizations_count ?? null,
       }));
-      await db.setCached('global', 'sumble_lists', lists);
+      creditsRemaining = data.credits_remaining ?? null; // captured free from the same call
+      await db.setCached('global', 'sumble_lists', { lists, creditsRemaining });
     }
-    res.json({ status: 'success', lists });
+    res.json({ status: 'success', lists, creditsRemaining });
   } catch (err) {
     console.error('[SUMBLE LISTS] error:', err.message);
     res.status(500).json({ status: 'error', message: err.message });
@@ -485,9 +490,92 @@ async function getCompanySlugs(companyIds) {
   return slugs;
 }
 
+// Batch-read arbitrary company properties (100 per batch).
+async function batchReadCompanyProps(companyIds, props) {
+  const out = [];
+  for (let i = 0; i < companyIds.length; i += 100) {
+    const chunk = companyIds.slice(i, i + 100);
+    const resp = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/read', {
+      method: 'POST',
+      headers: hubspotHeaders(),
+      body: JSON.stringify({ properties: props, inputs: chunk.map((id) => ({ id })) }),
+    });
+    if (!resp.ok) continue;
+    const data = await resp.json();
+    for (const c of data.results || []) out.push(c.properties || {});
+  }
+  return out;
+}
+
+const numv = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? null : n;
+};
+
+// Feature 1+2: segment SDR-seat report + Sumble coverage, aggregated from the
+// SYNCED HubSpot properties across a list's members. No Sumble API calls — free.
+app.post('/api/segment-report', async (req, res) => {
+  try {
+    const { hubspotListId } = req.body;
+    if (!hubspotListId) return res.status(400).json({ status: 'error', message: 'Missing hubspotListId' });
+    const memberIds = await getHubspotListMemberIds(hubspotListId);
+    const rows = await batchReadCompanyProps(memberIds, [
+      'sumble_organization_slug',
+      'sumble_sdr_ic_people_count',
+      'sumble_ae_ic_people_count_people_count',
+      'estimated__ic_sales_team_sumble',
+      'account_score__nooks_',
+      'current_sales_segment_sumble',
+      'sumble_sdr_job_post_1mo_count',
+    ]);
+
+    let matched = 0, icSdr = 0, icAe = 0, icSales = 0, fitSum = 0, fitCount = 0, hiring = 0;
+    const segments = { COMM: 0, 'Mid-Market': 0, Enterprise: 0, Unknown: 0 };
+    for (const p of rows) {
+      if (p.sumble_organization_slug) matched += 1;
+      icSdr += numv(p.sumble_sdr_ic_people_count) || 0;
+      icAe += numv(p.sumble_ae_ic_people_count_people_count) || 0;
+      icSales += numv(p.estimated__ic_sales_team_sumble) || 0;
+      const fit = numv(p.account_score__nooks_);
+      if (fit !== null) { fitSum += fit; fitCount += 1; }
+      const seg = p.current_sales_segment_sumble;
+      if (seg && segments[seg] !== undefined) segments[seg] += 1; else if (seg) segments.Unknown += 1; else segments.Unknown += 1;
+      if ((numv(p.sumble_sdr_job_post_1mo_count) || 0) > 0) hiring += 1;
+    }
+    const total = rows.length;
+    res.json({
+      status: 'success',
+      totalCompanies: total,
+      matched,
+      matchRate: total ? Math.round((matched / total) * 100) : 0,
+      icSdrTotal: Math.round(icSdr),
+      icAeTotal: Math.round(icAe),
+      icSalesTotal: Math.round(icSales),
+      avgFit: fitCount ? Math.round((fitSum / fitCount) * 10) / 10 : null,
+      segments,
+      hiringSdrCompanies: hiring,
+      capped: memberIds.length >= MAX_LIST_COMPANIES,
+    });
+  } catch (err) {
+    console.error('[SEGMENT REPORT] error:', err.message);
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Feature 3: recent push activity log.
+app.get('/api/push-log', async (req, res) => {
+  try {
+    const rows = await db.getPushLog(req.query.portalId, 20);
+    res.json({ status: 'success', entries: rows });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 app.post('/api/push-to-sumble-list', async (req, res) => {
   try {
-    const { hubspotListId, sumbleListId, newListName, portalId } = req.body;
+    const { hubspotListId, hubspotListName, sumbleListName, sumbleListId, newListName, portalId } = req.body;
     if (!hubspotListId) return res.status(400).json({ status: 'error', message: 'Missing hubspotListId' });
     if (!sumbleListId && !newListName) {
       return res.status(400).json({ status: 'error', message: 'Pick a Sumble list or provide a new list name' });
@@ -538,10 +626,20 @@ app.post('/api/push-to-sumble-list', async (req, res) => {
       failed = (ad.failed_slugs || []).length;
     }
 
+    const resolvedListName = listName || sumbleListName || 'Sumble list';
+    await db.logPush({
+      portalId,
+      hubspotList: hubspotListName || `List ${hubspotListId}`,
+      sumbleList: resolvedListName,
+      total: memberIds.length,
+      added: uniqueSlugs.length,
+      skipped: memberIds.length - uniqueSlugs.length,
+    }).catch((e) => console.error('[PUSH LIST] log failed:', e.message));
+
     res.json({
       status: 'success',
       listId,
-      listName,
+      listName: resolvedListName,
       listUrl,
       totalCompanies: memberIds.length,
       withSlug: uniqueSlugs.length,
