@@ -24,7 +24,8 @@ hubspot.extend(({ actions }) => <SumbleSalesOrgCard actions={actions} />);
 const PROPERTIES = [
   "name", "domain",
   "sumble_organization_name", "sumble_organization_slug", "sumble_profile_url",
-  "account_score__nooks_", "current_sales_segment_sumble",
+  "account_tier__nooks_", "account_score_lowno_signal", "sales_segment__clay_",
+  "why_this_account__nooks_",
   "sumble_employee_count", "sumble_total_people_trends_1yr_percent_g",
   "sumble_sdr_ic_people_count", "sumble_sdr_people_count", "sumble_sdr_pct_of_sales",
   "sumble_ae_ic_people_count_people_count", "sumble_ae_people_count", "estimated__ic_sales_team_sumble",
@@ -54,12 +55,51 @@ const fmtPct = (v) => {
 };
 const isTrue = (v) => v === "true" || v === true;
 
-const scoreTier = (s) => {
-  if (s === null) return null;
-  if (s >= 60) return { label: "Great fit", variant: "success" };
-  if (s >= 40) return { label: "Good fit", variant: "info" };
-  if (s >= 20) return { label: "Moderate fit", variant: "warning" };
-  return { label: "Weak fit", variant: "danger" };
+// Tier (Account Tier (Nooks)) → chip color + rep-facing fit explainer.
+// Colors use the Tag component palette: green / teal / purple / red.
+const TIER_META = {
+  "Tier A": {
+    color: "green",
+    lead: "Great fit:",
+    body: "top account for its segment, closest match to our existing customers and the best historical win rate.",
+  },
+  "Tier B": {
+    color: "teal",
+    lead: "Strong fit:",
+    body: "a core target for its segment.",
+  },
+  "Tier C": {
+    color: "purple",
+    lead: "Moderate fit:",
+    body: "worth a touch, but below your A and B accounts.",
+  },
+  "Tier D": {
+    color: "red",
+    lead: "Weak fit:",
+    body: "we have data on this account and it scored below the bar. Deprioritize unless you know something the data doesn't.",
+  },
+};
+
+// Resolve tier value (+ low/no-signal coverage flag) into the chip + explainer.
+const resolveTier = (tierVal, lowSignal) => {
+  const meta = TIER_META[tierVal];
+  if (meta) {
+    return { label: tierVal, color: meta.color, lead: meta.lead, body: meta.body };
+  }
+  if (lowSignal) {
+    return {
+      label: "Low/No Signal",
+      color: "default",
+      lead: "Unscored, not disqualified:",
+      body: "we don't have enough data to rank this account either way. Qualify it manually before deciding.",
+    };
+  }
+  return {
+    label: "Not scored",
+    color: "default",
+    lead: null,
+    body: "This account has not been scored — either because it was just added to HubSpot or because Sumble could not match it to its database. Reach out to RevOps if you think this is wrong.",
+  };
 };
 
 // Synced Sumble URLs often lack a protocol → prepend https so HubSpot treats
@@ -113,9 +153,9 @@ const SumbleSalesOrgCard = ({ actions }) => {
     );
   }
 
-  const fitScore = num(p.account_score__nooks_);
-  const tier = scoreTier(fitScore);
-  const segment = p.current_sales_segment_sumble;
+  const tier = resolveTier((p.account_tier__nooks_ || "").trim(), isTrue(p.account_score_lowno_signal));
+  const segment = p.sales_segment__clay_;
+  const why = (p.why_this_account__nooks_ || "").trim();
   const growthN = num(p.sumble_total_people_trends_1yr_percent_g);
   const growth = fmtPct(p.sumble_total_people_trends_1yr_percent_g);
   const sdr1mo = num(p.sumble_sdr_job_post_1mo_count);
@@ -125,24 +165,39 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Header: fit score + size, then colored tags ---- */}
+      {/* ---- Header: Tier + Segment, tier explainer callout, "Why this account?" ---- */}
       <Tile>
         <Flex direction="column" gap="small">
-          <Statistics>
-            <StatisticsItem label="Nooks Fit Score" number={fitScore === null ? "—" : fitScore} />
-            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
-              {growth && growthN !== null ? (
-                <StatisticsTrend
-                  value={`${growth} YoY`}
-                  direction={growthN >= 0 ? "increase" : "decrease"}
-                  color={growthN >= 0 ? "green" : "red"}
-                />
-              ) : null}
-            </StatisticsItem>
-          </Statistics>
-          <Flex direction="row" gap="extra-small" wrap="wrap">
-            {tier ? <StatusTag variant={tier.variant}>{tier.label}</StatusTag> : null}
-            {segment ? <StatusTag variant="info">{segment}</StatusTag> : null}
+          <Flex direction="row" gap="large" wrap="wrap">
+            <Flex direction="column" gap="extra-small">
+              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Tier</Text>
+              <Tag variant={tier.color}>{tier.label}</Tag>
+            </Flex>
+            <Flex direction="column" gap="extra-small">
+              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Segment</Text>
+              <Text format={{ fontWeight: "bold" }}>{segment || "—"}</Text>
+            </Flex>
+          </Flex>
+
+          {/* small, simple tier explainer */}
+          <Text variant="microcopy">
+            {tier.lead ? (
+              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>{tier.lead}</Text>
+            ) : null}
+            {tier.lead ? " " : null}{tier.body}
+          </Text>
+
+          <Divider />
+
+          <Flex direction="column" gap="extra-small">
+            <Heading inline>Why this account?</Heading>
+            {why ? (
+              <Text>{why}</Text>
+            ) : (
+              <Text format={{ italic: true }}>
+                We don't have enough context for this account yet. Check back later for a score explanation.
+              </Text>
+            )}
           </Flex>
         </Flex>
       </Tile>
@@ -175,13 +230,24 @@ const SumbleSalesOrgCard = ({ actions }) => {
         <Flex direction="column" gap="small">
           <Heading inline>GTM org breakdown</Heading>
           <Statistics>
+            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
+              {growth && growthN !== null ? (
+                <StatisticsTrend
+                  value={`${growth} YoY`}
+                  direction={growthN >= 0 ? "increase" : "decrease"}
+                  color={growthN >= 0 ? "green" : "red"}
+                />
+              ) : null}
+            </StatisticsItem>
             <StatisticsItem label="Total Sales" number={fmtInt(p.sumble_sales_people_count)} />
             <StatisticsItem label="All SDRs" number={fmtInt(p.sumble_sdr_people_count)} />
-            <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
           </Statistics>
           <Statistics>
+            <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
             <StatisticsItem label="RevOps" number={fmtInt(p.sumble_revops_people_count)} />
             <StatisticsItem label="Enablement" number={fmtInt(p.sumble_sales_enablement_people_count)} />
+          </Statistics>
+          <Statistics>
             <StatisticsItem label="GTM Eng" number={fmtInt(p.sumble_gtm_engineer_people_count)} />
           </Statistics>
           {fmtPct(p.sumble_sdr_pct_of_sales) || fmtPct(p.sumble_sales_pct_of_employees) ? (
