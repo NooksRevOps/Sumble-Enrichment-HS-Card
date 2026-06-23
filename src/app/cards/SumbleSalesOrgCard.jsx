@@ -182,7 +182,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
           {/* small, simple tier explainer */}
           <Text variant="microcopy">
             {tier.lead ? (
-              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>{tier.lead}</Text>
+              <Text variant="microcopy" format={{ fontWeight: "bold" }}>{tier.lead}</Text>
             ) : null}
             {tier.lead ? " " : null}{tier.body}
           </Text>
@@ -210,6 +210,15 @@ const SumbleSalesOrgCard = ({ actions }) => {
             Sumble's individual-contributor SDR and AE estimates — the basis for Nooks seat sizing.
           </Text>
           <Statistics>
+            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
+              {growth && growthN !== null ? (
+                <StatisticsTrend
+                  value={`${growth} YoY`}
+                  direction={growthN >= 0 ? "increase" : "decrease"}
+                  color={growthN >= 0 ? "green" : "red"}
+                />
+              ) : null}
+            </StatisticsItem>
             <StatisticsItem label="IC SDRs" number={fmtInt(p.sumble_sdr_ic_people_count)} />
             <StatisticsItem label="IC AEs" number={fmtInt(p.sumble_ae_ic_people_count_people_count)} />
             <StatisticsItem label="Total IC Sales" number={fmtInt(p.estimated__ic_sales_team_sumble)} />
@@ -230,24 +239,13 @@ const SumbleSalesOrgCard = ({ actions }) => {
         <Flex direction="column" gap="small">
           <Heading inline>GTM org breakdown</Heading>
           <Statistics>
-            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
-              {growth && growthN !== null ? (
-                <StatisticsTrend
-                  value={`${growth} YoY`}
-                  direction={growthN >= 0 ? "increase" : "decrease"}
-                  color={growthN >= 0 ? "green" : "red"}
-                />
-              ) : null}
-            </StatisticsItem>
             <StatisticsItem label="Total Sales" number={fmtInt(p.sumble_sales_people_count)} />
             <StatisticsItem label="All SDRs" number={fmtInt(p.sumble_sdr_people_count)} />
+            <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
           </Statistics>
           <Statistics>
-            <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
             <StatisticsItem label="RevOps" number={fmtInt(p.sumble_revops_people_count)} />
             <StatisticsItem label="Enablement" number={fmtInt(p.sumble_sales_enablement_people_count)} />
-          </Statistics>
-          <Statistics>
             <StatisticsItem label="GTM Eng" number={fmtInt(p.sumble_gtm_engineer_people_count)} />
           </Statistics>
           {fmtPct(p.sumble_sdr_pct_of_sales) || fmtPct(p.sumble_sales_pct_of_employees) ? (
