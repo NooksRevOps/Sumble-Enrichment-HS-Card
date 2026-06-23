@@ -55,51 +55,69 @@ const fmtPct = (v) => {
 };
 const isTrue = (v) => v === "true" || v === true;
 
-// Tier (Account Tier (Nooks)) → chip color + rep-facing fit explainer.
-// Colors use the Tag component palette: green / teal / purple / red.
+// Tier (Account Tier (Nooks)) → colored fit chip + rep-facing explainer.
+// HubSpot Tag only ships semantic colors: success(green) / info(blue) /
+// warning(amber) / error(red) / default(gray). No purple or teal exist.
 const TIER_META = {
   "Tier A": {
-    color: "green",
-    lead: "Great fit:",
+    color: "success",
+    fit: "Great fit",
     body: "top account for its segment, closest match to our existing customers and the best historical win rate.",
   },
   "Tier B": {
-    color: "teal",
-    lead: "Strong fit:",
+    color: "info",
+    fit: "Strong fit",
     body: "a core target for its segment.",
   },
   "Tier C": {
-    color: "purple",
-    lead: "Moderate fit:",
+    color: "warning",
+    fit: "Moderate fit",
     body: "worth a touch, but below your A and B accounts.",
   },
   "Tier D": {
-    color: "red",
-    lead: "Weak fit:",
+    color: "error",
+    fit: "Weak fit",
     body: "we have data on this account and it scored below the bar. Deprioritize unless you know something the data doesn't.",
   },
 };
 
-// Resolve tier value (+ low/no-signal coverage flag) into the chip + explainer.
+// Resolve tier value (+ low/no-signal coverage flag) into chip + explainer.
+// `label` is the big value shown; `fit`/`color` drive the colored chip.
 const resolveTier = (tierVal, lowSignal) => {
   const meta = TIER_META[tierVal];
   if (meta) {
-    return { label: tierVal, color: meta.color, lead: meta.lead, body: meta.body };
+    return { label: tierVal, color: meta.color, fit: meta.fit, body: meta.body };
   }
   if (lowSignal) {
     return {
       label: "Low/No Signal",
       color: "default",
-      lead: "Unscored, not disqualified:",
+      fit: "Unscored",
       body: "we don't have enough data to rank this account either way. Qualify it manually before deciding.",
     };
   }
   return {
     label: "Not scored",
     color: "default",
-    lead: null,
+    fit: null,
     body: "This account has not been scored — either because it was just added to HubSpot or because Sumble could not match it to its database. Reach out to RevOps if you think this is wrong.",
   };
+};
+
+// Capitalize the first character of a string.
+const capFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+// Turn the raw "Why this account" field into clean paragraphs:
+// split a "Why now:" clause off into its own paragraph, and capitalize the
+// first letter of every paragraph.
+const formatWhy = (raw) => {
+  const text = (raw || "").trim();
+  if (!text) return [];
+  const m = text.match(/why now:/i);
+  const paras = m && m.index > 0
+    ? [text.slice(0, m.index).trim(), text.slice(m.index).trim()]
+    : [text];
+  return paras.filter(Boolean).map(capFirst);
 };
 
 // Synced Sumble URLs often lack a protocol → prepend https so HubSpot treats
@@ -155,7 +173,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
   const tier = resolveTier((p.account_tier__nooks_ || "").trim(), isTrue(p.account_score_lowno_signal));
   const segment = p.sales_segment__clay_;
-  const why = (p.why_this_account__nooks_ || "").trim();
+  const whyParas = formatWhy(p.why_this_account__nooks_);
   const growthN = num(p.sumble_total_people_trends_1yr_percent_g);
   const growth = fmtPct(p.sumble_total_people_trends_1yr_percent_g);
   const sdr1mo = num(p.sumble_sdr_job_post_1mo_count);
@@ -165,34 +183,26 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Header: Tier + Segment, tier explainer callout, "Why this account?" ---- */}
+      {/* ---- Header: Tier + Segment, tier explainer, "Why this account?" ---- */}
       <Tile>
         <Flex direction="column" gap="small">
-          <Flex direction="row" gap="large" wrap="wrap">
-            <Flex direction="column" gap="extra-small">
-              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Tier</Text>
-              <Tag variant={tier.color}>{tier.label}</Tag>
-            </Flex>
-            <Flex direction="column" gap="extra-small">
-              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Segment</Text>
-              <Text format={{ fontWeight: "bold" }}>{segment || "—"}</Text>
-            </Flex>
-          </Flex>
+          <Statistics>
+            <StatisticsItem label="Tier" number={tier.label} />
+            <StatisticsItem label="Segment" number={segment || "—"} />
+          </Statistics>
 
-          {/* small, simple tier explainer */}
+          {/* colored fit chip inline with the explainer sentence */}
           <Text variant="microcopy">
-            {tier.lead ? (
-              <Text variant="microcopy" format={{ fontWeight: "bold" }}>{tier.lead}</Text>
-            ) : null}
-            {tier.lead ? " " : null}{tier.body}
+            {tier.fit ? <Tag variant={tier.color} inline>{tier.fit}</Tag> : null}
+            {tier.fit ? " " : null}{tier.body}
           </Text>
 
           <Divider />
 
-          <Flex direction="column" gap="extra-small">
+          <Flex direction="column" gap="small">
             <Heading inline>Why this account?</Heading>
-            {why ? (
-              <Text>{why}</Text>
+            {whyParas.length ? (
+              whyParas.map((para, i) => <Text key={i}>{para}</Text>)
             ) : (
               <Text format={{ italic: true }}>
                 We don't have enough context for this account yet. Check back later for a score explanation.
