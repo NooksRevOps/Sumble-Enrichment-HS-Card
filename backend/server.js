@@ -1,5 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const zlib = require('zlib');
+const { promisify } = require('util');
+const gunzip = promisify(zlib.gunzip);
 const db = require('./db');
 
 const app = express();
@@ -13,6 +16,11 @@ const HUBSPOT_SERVICE_KEY = process.env.HUBSPOT_SERVICE_KEY;
 const ALLOWED_PORTAL_ID = process.env.ALLOWED_PORTAL_ID || null;
 
 const SUMBLE_BASE = 'https://api.sumble.com';
+
+// Score-decomposition export (read-only machine-to-machine endpoint on the
+// scoring service). We pull the full NDJSON snapshot once daily and cache it.
+const SCORING_BREAKDOWNS_URL = (process.env.SCORING_BREAKDOWNS_URL || 'https://sumble-account-scoring.onrender.com').replace(/\/$/, '');
+const SERVICE_API_KEY = process.env.SERVICE_API_KEY || null;
 
 // --- endpoint paths (verified against the live Sumble API) ---
 const SUMBLE_PEOPLE_FIND_PATH = '/v6/people/find';        // POST, organization.domain + filters
@@ -33,6 +41,7 @@ const ORG_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // 30d (org id rarely changes)
 
 console.log(`[STARTUP] Sumble backend at ${new Date().toISOString()}`);
 console.log(`[STARTUP] env Sumble key: ${!!ENV_SUMBLE_KEY} | HubSpot key: ${!!HUBSPOT_SERVICE_KEY} | portal guard: ${ALLOWED_PORTAL_ID || 'off'}`);
+console.log(`[STARTUP] score breakdowns: ${SERVICE_API_KEY ? 'on' : 'OFF (set SERVICE_API_KEY)'} | source: ${SCORING_BREAKDOWNS_URL}`);
 
 const sumbleHeaders = (apiKey) => ({
   Authorization: `Bearer ${apiKey}`,
@@ -705,6 +714,102 @@ async function bootstrapSeatSums() {
   }
 }
 
+// ---- Score-decomposition: daily pull of the scoring export → Postgres cache ----
+// The export is a gzip-compressed NDJSON file served WITHOUT Content-Encoding,
+// so we must gunzip the body ourselves (fetch won't). Full snapshot → upsert all.
+async function pullAndCacheBreakdowns() {
+  if (!SERVICE_API_KEY) {
+    console.warn('[BREAKDOWNS] SERVICE_API_KEY not set — skipping pull.');
+    return { skipped: true };
+  }
+  const startedAt = Date.now();
+  const res = await fetch(`${SCORING_BREAKDOWNS_URL}/service/breakdowns`, {
+    headers: { 'X-Service-Key': SERVICE_API_KEY },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const err = new Error(`breakdowns pull failed: ${res.status} ${body.slice(0, 200)}`);
+    err.status = res.status;
+    throw err; // caller keeps the existing cache and retries next cycle
+  }
+  const gz = Buffer.from(await res.arrayBuffer()); // opaque gzip — gunzip ourselves
+  const ndjson = (await gunzip(gz)).toString('utf8');
+  const records = [];
+  let bad = 0;
+  for (const line of ndjson.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    try { records.push(JSON.parse(t)); } catch { bad++; }
+  }
+  const cached = await db.upsertBreakdowns(records);
+  console.log(`[BREAKDOWNS] cached ${cached} accounts (${bad} unparseable lines) in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+  return { cached, badLines: bad, generatedAt: new Date().toISOString() };
+}
+
+// Daily refresh, in-process. Fires ~10:00 Pacific (after the Mon 08:00 PT
+// re-score), then every 24h. The export itself is never > ~24h old.
+const BREAKDOWNS_HOUR_UTC = 17; // ~10:00 America/Los_Angeles
+function msUntilNextBreakdownsRun() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(BREAKDOWNS_HOUR_UTC, 0, 0, 0);
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  return next - now;
+}
+function scheduleDailyBreakdowns() {
+  const run = () => pullAndCacheBreakdowns().catch((e) => console.error('[BREAKDOWNS] daily failed:', e.message));
+  setTimeout(() => {
+    run();
+    setInterval(run, 24 * 60 * 60 * 1000);
+  }, msUntilNextBreakdownsRun());
+}
+// First deploy: pull once in the background if the cache is empty.
+async function bootstrapBreakdowns() {
+  try {
+    if (!SERVICE_API_KEY) return;
+    const n = await db.breakdownCount();
+    if (!n) {
+      console.log('[BREAKDOWNS] no cache yet — bootstrapping in background');
+      pullAndCacheBreakdowns().catch((e) => console.error('[BREAKDOWNS] bootstrap failed:', e.message));
+    }
+  } catch (e) {
+    console.error('[BREAKDOWNS] bootstrap check failed:', e.message);
+  }
+}
+
+// Per-company serve: the card reads one cached row. No Sumble credits, no live
+// dependency on the scoring service at view-time.
+app.post('/api/score-breakdown', async (req, res) => {
+  try {
+    const { companyId, portalId } = req.body || {};
+    if (!portalAllowed(portalId)) {
+      return res.status(403).json({ status: 'error', message: 'This portal is not allowed to use the app.' });
+    }
+    if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
+    const breakdown = await db.getBreakdown(companyId);
+    res.json({ status: 'success', breakdown: breakdown || null });
+  } catch (err) {
+    console.error('[BREAKDOWN] serve error:', err.message);
+    res.status(err.status || 500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Admin: force a fresh pull now (fire-and-forget; the pull can take ~30s+).
+app.post('/api/score-breakdowns/refresh', async (req, res) => {
+  try {
+    const { portalId } = req.body || {};
+    if (!portalAllowed(portalId)) {
+      return res.status(403).json({ status: 'error', message: 'Not allowed.' });
+    }
+    pullAndCacheBreakdowns()
+      .then((r) => console.log('[BREAKDOWNS] manual refresh done:', JSON.stringify(r)))
+      .catch((e) => console.error('[BREAKDOWNS] manual refresh failed:', e.message));
+    res.json({ status: 'success', message: 'Breakdown refresh started.' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // Feature 3: recent push activity log.
 app.get('/api/push-log', async (req, res) => {
   try {
@@ -909,4 +1014,6 @@ db.init()
     app.listen(PORT, () => console.log(`Sumble backend listening on ${PORT}`));
     bootstrapSeatSums();        // build portal seat sums once if never built
     scheduleNightlySeatSums();  // refresh nightly thereafter
+    bootstrapBreakdowns();      // pull score-decomposition export once if empty
+    scheduleDailyBreakdowns();  // refresh daily thereafter
   });

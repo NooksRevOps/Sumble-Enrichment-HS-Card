@@ -9,6 +9,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 let pool = null;
 const memory = new Map(); // key `${orgKey}::${section}` -> { payload, fetchedAt }
 const secretMemory = new Map(); // portalId -> encrypted blob (in-memory fallback)
+const breakdownMemory = new Map(); // company_id -> score-breakdown record (in-memory fallback)
 
 // AES-256-GCM at-rest encryption for stored credentials (the per-portal Sumble
 // key). Key derived from ENCRYPTION_KEY env via sha256 so any string works.
@@ -77,6 +78,13 @@ async function init() {
       added         integer,
       skipped       integer,
       created_at    timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS score_breakdowns (
+      company_id text        PRIMARY KEY,
+      payload    jsonb       NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
   console.log(`[DB] tables ready (Postgres). Encryption: ${encKey ? 'on' : 'OFF (set ENCRYPTION_KEY)'}`);
@@ -149,6 +157,53 @@ async function deleteSecret(portalId) {
   await pool.query('DELETE FROM app_secrets WHERE portal_id = $1', [String(portalId)]);
 }
 
+// ---- score-decomposition cache (daily full snapshot from the scoring export) ----
+// One row per account keyed by company_id (== HubSpot company objectId). Stored as
+// the whole NDJSON record in `payload`. Upserted in batches by the daily pull job.
+async function upsertBreakdowns(records) {
+  const valid = (records || []).filter((r) => r && r.company_id != null);
+  if (!pool) {
+    for (const r of valid) breakdownMemory.set(String(r.company_id), r);
+    return valid.length;
+  }
+  const BATCH = 500;
+  let n = 0;
+  for (let i = 0; i < valid.length; i += BATCH) {
+    const slice = valid.slice(i, i + BATCH);
+    const tuples = [];
+    const params = [];
+    slice.forEach((r, j) => {
+      tuples.push(`($${j * 2 + 1}, $${j * 2 + 2}, now())`);
+      params.push(String(r.company_id), JSON.stringify(r));
+    });
+    await pool.query(
+      `INSERT INTO score_breakdowns (company_id, payload, updated_at)
+       VALUES ${tuples.join(',')}
+       ON CONFLICT (company_id)
+       DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
+      params
+    );
+    n += slice.length;
+  }
+  return n;
+}
+
+// Returns the cached breakdown record for a company, or null.
+async function getBreakdown(companyId) {
+  if (!companyId) return null;
+  const key = String(companyId);
+  if (!pool) return breakdownMemory.get(key) || null;
+  const { rows } = await pool.query('SELECT payload FROM score_breakdowns WHERE company_id = $1', [key]);
+  return rows.length ? rows[0].payload : null;
+}
+
+// Number of cached breakdown rows (used to decide whether to bootstrap).
+async function breakdownCount() {
+  if (!pool) return breakdownMemory.size;
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM score_breakdowns');
+  return rows[0].n;
+}
+
 const encryptionEnabled = !!encKey;
 
 // Returns the cached payload if present and younger than ttlMs, else null.
@@ -184,4 +239,4 @@ async function setCached(orgKey, section, payload) {
   );
 }
 
-module.exports = { init, getCached, setCached, setSecret, getSecret, deleteSecret, encryptionEnabled, logPush, getPushLog };
+module.exports = { init, getCached, setCached, setSecret, getSecret, deleteSecret, encryptionEnabled, logPush, getPushLog, upsertBreakdowns, getBreakdown, breakdownCount };
