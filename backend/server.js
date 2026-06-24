@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const zlib = require('zlib');
-const { promisify } = require('util');
-const gunzip = promisify(zlib.gunzip);
+const readline = require('readline');
+const { Readable } = require('stream');
 const db = require('./db');
 
 const app = express();
@@ -732,16 +732,35 @@ async function pullAndCacheBreakdowns() {
     err.status = res.status;
     throw err; // caller keeps the existing cache and retries next cycle
   }
-  const gz = Buffer.from(await res.arrayBuffer()); // opaque gzip — gunzip ourselves
-  const ndjson = (await gunzip(gz)).toString('utf8');
-  const records = [];
+  // STREAM the ~60MB-decompressed NDJSON: gunzip incrementally, parse line by
+  // line, and flush to Postgres in batches. Never hold the whole file (or the
+  // full record array) in memory at once — that OOM-kills a small instance.
+  const source = Readable.fromWeb(res.body).pipe(zlib.createGunzip());
+  const rl = readline.createInterface({ input: source, crlfDelay: Infinity });
+
+  const FLUSH_AT = 1000;
+  let batch = [];
+  let cached = 0;
   let bad = 0;
-  for (const line of ndjson.split('\n')) {
-    const t = line.trim();
-    if (!t) continue;
-    try { records.push(JSON.parse(t)); } catch { bad++; }
+  const flush = async () => {
+    if (!batch.length) return;
+    const toWrite = batch;
+    batch = [];
+    cached += await db.upsertBreakdowns(toWrite); // backpressure: readline pauses while we await
+  };
+
+  try {
+    for await (const line of rl) {
+      const t = line.trim();
+      if (!t) continue;
+      try { batch.push(JSON.parse(t)); } catch { bad++; }
+      if (batch.length >= FLUSH_AT) await flush();
+    }
+    await flush();
+  } finally {
+    rl.close();
   }
-  const cached = await db.upsertBreakdowns(records);
+
   console.log(`[BREAKDOWNS] cached ${cached} accounts (${bad} unparseable lines) in ${Math.round((Date.now() - startedAt) / 1000)}s`);
   return { cached, badLines: bad, generatedAt: new Date().toISOString() };
 }
@@ -769,8 +788,12 @@ async function bootstrapBreakdowns() {
     if (!SERVICE_API_KEY) return;
     const n = await db.breakdownCount();
     if (!n) {
-      console.log('[BREAKDOWNS] no cache yet — bootstrapping in background');
-      pullAndCacheBreakdowns().catch((e) => console.error('[BREAKDOWNS] bootstrap failed:', e.message));
+      // Delay the first heavy pull so the health check marks the deploy live
+      // before the background work starts (belt-and-suspenders with streaming).
+      console.log('[BREAKDOWNS] no cache yet — bootstrapping in background in 15s');
+      setTimeout(() => {
+        pullAndCacheBreakdowns().catch((e) => console.error('[BREAKDOWNS] bootstrap failed:', e.message));
+      }, 15000);
     }
   } catch (e) {
     console.error('[BREAKDOWNS] bootstrap check failed:', e.message);
