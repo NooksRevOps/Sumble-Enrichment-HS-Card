@@ -1,0 +1,11 @@
+{
+  "uid": "sumble-score-breakdown-panel-card",
+  "type": "card",
+  "config": {
+    "name": "Sumble · Score Breakdown (Panel)",
+    "description": "A/B variant: per-signal score decomposition with the top 6 signals on the card and a 'View all signals' button that opens the full table in a side panel. Served from the daily scoring export cache — no Sumble credits used.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/SumbleScoreBreakdownPanelCard.jsx",
+    "objectTypes": ["COMPANIES"]
+  }
+}
