@@ -1,0 +1,11 @@
+{
+  "uid": "sumble-seats-brief-tabs-card",
+  "type": "card",
+  "config": {
+    "name": "Sumble · Seats & Brief",
+    "description": "Sellable seats and the AI intelligence brief combined into one card with two tabs. The standalone Sellable Seats and Intelligence Brief cards remain available for independent use.",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/SumbleSeatsBriefTabsCard.jsx",
+    "objectTypes": ["COMPANIES"]
+  }
+}

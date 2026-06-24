@@ -51,13 +51,13 @@ const ext = (url) => {
 // Signal column gets a fixed, generous width so long labels don't wrap to 3-4
 // lines and balloon the row height. Contribution takes the remaining space.
 const SignalTable = ({ rows, maxContrib }) => (
-  <Table bordered>
+  <Table bordered density="condensed">
     <TableHead>
       <TableRow>
-        <TableHeader width={210}>Signal</TableHeader>
+        <TableHeader width={200}>Signal</TableHeader>
         <TableHeader width="min" align="right">Raw</TableHeader>
         <TableHeader width="min" align="right">Weight</TableHeader>
-        <TableHeader width="max">Contribution</TableHeader>
+        <TableHeader width={170}>Contribution</TableHeader>
       </TableRow>
     </TableHead>
     <TableBody>

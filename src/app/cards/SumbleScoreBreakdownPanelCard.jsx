@@ -49,13 +49,13 @@ const ext = (url) => {
 };
 
 const SignalTable = ({ rows, maxContrib }) => (
-  <Table bordered>
+  <Table bordered density="condensed">
     <TableHead>
       <TableRow>
-        <TableHeader width={210}>Signal</TableHeader>
+        <TableHeader width={200}>Signal</TableHeader>
         <TableHeader width="min" align="right">Raw</TableHeader>
         <TableHeader width="min" align="right">Weight</TableHeader>
-        <TableHeader width="max">Contribution</TableHeader>
+        <TableHeader width={170}>Contribution</TableHeader>
       </TableRow>
     </TableHead>
     <TableBody>
@@ -159,7 +159,7 @@ const SumbleScoreBreakdownPanelCard = ({ actions }) => {
               <Button
                 variant="secondary"
                 overlay={
-                  <Panel id="sumble-score-breakdown-panel" title="Score breakdown — all signals" width="lg">
+                  <Panel id="sumble-score-breakdown-panel" title="Score breakdown — all signals" width="md">
                     <PanelBody>
                       <SignalTable rows={signals} maxContrib={maxContrib} />
                     </PanelBody>
