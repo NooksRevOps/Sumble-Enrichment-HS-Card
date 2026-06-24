@@ -479,8 +479,13 @@ const SumbleSeatsBriefTabsCard = ({ actions }) => {
     }
   };
 
+  // Controlled selection: the card re-renders as people/brief data loads async,
+  // and an uncontrolled Tabs can drop its selection/content across those
+  // re-renders. Holding the active tab in our own state keeps it stable.
+  const [activeTab, setActiveTab] = useState("seats");
+
   return (
-    <Tabs defaultSelected="seats">
+    <Tabs selected={activeTab} onSelectedChange={setActiveTab}>
       <Tab tabId="seats" title="Sellable seats">
         <SeatsView
           loading={peopleLoading}
