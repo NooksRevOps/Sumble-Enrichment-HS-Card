@@ -480,7 +480,7 @@ const BriefTab = ({ actions }) => {
  * ========================================================================== */
 
 const SumbleSeatsBriefTabsCard = ({ actions }) => (
-  <Tabs>
+  <Tabs defaultSelected="seats">
     <Tab tabId="seats" title="Sellable seats">
       <SeatsTab actions={actions} />
     </Tab>

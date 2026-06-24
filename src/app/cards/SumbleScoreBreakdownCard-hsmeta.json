@@ -2,8 +2,8 @@
   "uid": "sumble-score-breakdown-card",
   "type": "card",
   "config": {
-    "name": "Sumble · Score Breakdown (Inline)",
-    "description": "A/B variant: per-signal score decomposition, top 6 signals with an inline 'Show all' toggle that expands the rest on the card. Served from the daily scoring export cache — no Sumble credits used.",
+    "name": "Sumble · Score Breakdown",
+    "description": "Per-signal score decomposition: top 6 signals with an inline 'Show all' toggle that expands the rest on the card. Served from the daily scoring export cache — no Sumble credits used.",
     "location": "crm.record.tab",
     "entrypoint": "/app/cards/SumbleScoreBreakdownCard.jsx",
     "objectTypes": ["COMPANIES"]

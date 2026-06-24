@@ -3,6 +3,7 @@ import {
   Text,
   Heading,
   Flex,
+  Box,
   Tile,
   Divider,
   Statistics,
@@ -10,6 +11,16 @@ import {
   StatisticsTrend,
   StatusTag,
   Tag,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableHeader,
+  TableCell,
+  ProgressBar,
+  Panel,
+  PanelBody,
+  PanelSection,
   Link,
   Button,
   Alert,
@@ -128,13 +139,62 @@ const ext = (url) => {
   return { url: full, external: true };
 };
 
+const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
+
+// --- score decomposition (per-signal contribution) — opened from the tier callout ---
+function fmtRaw(r, isUsd, isCount) {
+  const n = Number(r);
+  if (Number.isNaN(n)) return String(r);
+  if (isUsd) return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  if (isCount) return String(Math.round(n));
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(0)}M`;
+  if (Math.abs(n) >= 1e4) return `${(n / 1e3).toFixed(0)}K`;
+  if (n === Math.trunc(n)) return String(Math.trunc(n));
+  return n.toFixed(2).replace(/\.?0+$/, "");
+}
+const fmtPts = (v) => `${(Number(v) || 0).toFixed(1)} pts`;
+
+const SignalTable = ({ rows, maxContrib }) => (
+  <Table bordered density="condensed">
+    <TableHead>
+      <TableRow>
+        <TableHeader width={200}>Signal</TableHeader>
+        <TableHeader width="min" align="right">Raw</TableHeader>
+        <TableHeader width="min" align="right">Weight</TableHeader>
+        <TableHeader width={170}>Contribution</TableHeader>
+      </TableRow>
+    </TableHead>
+    <TableBody>
+      {rows.map((s, i) => (
+        <TableRow key={i}>
+          <TableCell>
+            {ext(s.link) ? <Link href={ext(s.link)}>{s.label}</Link> : <Text>{s.label}</Text>}
+          </TableCell>
+          <TableCell align="right"><Text>{fmtRaw(s.raw, s.is_usd, s.is_count)}</Text></TableCell>
+          <TableCell align="right"><Text>{fmtPct(s.weight_pct)}</Text></TableCell>
+          <TableCell>
+            <ProgressBar
+              variant="success"
+              value={Number(s.contribution) || 0}
+              maxValue={maxContrib}
+              valueDescription={fmtPts(s.contribution)}
+            />
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
+
 const SumbleSalesOrgCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
+  const portalId = context?.portal?.id;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [p, setP] = useState(null);
+  const [bd, setBd] = useState(null); // cached score decomposition (for the breakdown panel)
 
   useEffect(() => {
     (async () => {
@@ -148,6 +208,24 @@ const SumbleSalesOrgCard = ({ actions }) => {
         setError("Couldn't load Sumble data for this company.");
       } finally {
         setLoading(false);
+      }
+    })();
+  }, [companyId]);
+
+  // Pull the cached score decomposition in the background (free, our cache).
+  // The "Score breakdown" button only appears once this loads with signals.
+  useEffect(() => {
+    (async () => {
+      if (!companyId) return;
+      try {
+        const resp = await hubspot.fetch(`${BACKEND_URL}/api/score-breakdown`, {
+          method: "POST",
+          body: { companyId, portalId },
+        });
+        const json = await resp.json();
+        if (json.status === "success") setBd(json.breakdown);
+      } catch (err) {
+        console.error("[SumbleSalesOrg] breakdown load error:", err);
       }
     })();
   }, [companyId]);
@@ -181,9 +259,12 @@ const SumbleSalesOrgCard = ({ actions }) => {
   const leadgenTools = (p.sumble_primary_leadgen_tools || "")
     .split(/[;,]/).map((s) => s.trim()).filter(Boolean);
 
+  const bdSignals = Array.isArray(bd?.signals) ? bd.signals : [];
+  const bdMax = Math.max(...bdSignals.map((s) => Number(s.contribution) || 0), 0.01);
+
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Tier + Segment, with a colored tier callout ---- */}
+      {/* ---- Tier + Segment, with a colored tier callout + breakdown panel ---- */}
       <Tile>
         <Flex direction="column" gap="small">
           <Statistics>
@@ -192,8 +273,31 @@ const SumbleSalesOrgCard = ({ actions }) => {
           </Statistics>
 
           {/* colored callout makes the tier rating impossible to miss
-              (A=green, B=blue, C=amber, D=red, unscored=neutral) */}
-          <Alert title={tier.fit} variant={tier.color}>{tier.body}</Alert>
+              (A=green, B=blue, C=amber, D=red, unscored=neutral). The score
+              breakdown button sits to its right, vertically centered. */}
+          <Flex direction="row" gap="medium" align="center" wrap="wrap">
+            <Box flex="auto">
+              <Alert title={tier.fit} variant={tier.color}>{tier.body}</Alert>
+            </Box>
+            {bdSignals.length ? (
+              <Box flex="none">
+                <Button
+                  variant="secondary"
+                  overlay={
+                    <Panel id="sumble-tier-breakdown-panel" title="Score breakdown — all signals" width="sm">
+                      <PanelBody>
+                        <PanelSection>
+                          <SignalTable rows={bdSignals} maxContrib={bdMax} />
+                        </PanelSection>
+                      </PanelBody>
+                    </Panel>
+                  }
+                >
+                  Score breakdown
+                </Button>
+              </Box>
+            ) : null}
+          </Flex>
         </Flex>
       </Tile>
 
