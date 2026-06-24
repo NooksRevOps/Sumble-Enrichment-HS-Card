@@ -91,15 +91,15 @@ const resolveTier = (tierVal, lowSignal) => {
   if (lowSignal) {
     return {
       label: "Low/No Signal",
-      color: "default",
-      fit: "Unscored",
+      color: "tip",
+      fit: "Unscored — not disqualified",
       body: "we don't have enough data to rank this account either way. Qualify it manually before deciding.",
     };
   }
   return {
     label: "Not scored",
-    color: "default",
-    fit: null,
+    color: "tip",
+    fit: "Not scored",
     body: "This account has not been scored — either because it was just added to HubSpot or because Sumble could not match it to its database. Reach out to RevOps if you think this is wrong.",
   };
 };
@@ -183,7 +183,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
 
   return (
     <Flex direction="column" gap="medium">
-      {/* ---- Header: Tier + Segment, tier explainer, "Why this account?" ---- */}
+      {/* ---- Tier + Segment, with a colored tier callout ---- */}
       <Tile>
         <Flex direction="column" gap="small">
           <Statistics>
@@ -191,26 +191,24 @@ const SumbleSalesOrgCard = ({ actions }) => {
             <StatisticsItem label="Segment" number={segment || "—"} />
           </Statistics>
 
-          {/* colored fit chip inline with the explainer sentence */}
-          <Text variant="microcopy">
-            {tier.fit ? <Tag variant={tier.color} inline>{tier.fit}</Tag> : null}
-            {tier.fit ? " " : null}{tier.body}
-          </Text>
-
-          <Divider />
-
-          <Flex direction="column" gap="small">
-            <Heading inline>Why this account?</Heading>
-            {whyParas.length ? (
-              whyParas.map((para, i) => <Text key={i}>{para}</Text>)
-            ) : (
-              <Text format={{ italic: true }}>
-                We don't have enough context for this account yet. Check back later for a score explanation.
-              </Text>
-            )}
-          </Flex>
+          {/* colored callout makes the tier rating impossible to miss
+              (A=green, B=blue, C=amber, D=red, unscored=neutral) */}
+          <Alert title={tier.fit} variant={tier.color}>{tier.body}</Alert>
         </Flex>
       </Tile>
+
+      {/* ---- Why this account? — boxed callout so it doesn't fade out ---- */}
+      <Alert title="Why this account?" variant="tip">
+        {whyParas.length ? (
+          <Flex direction="column" gap="small">
+            {whyParas.map((para, i) => <Text key={i}>{para}</Text>)}
+          </Flex>
+        ) : (
+          <Text format={{ italic: true }}>
+            We don't have enough context for this account yet. Check back later for a score explanation.
+          </Text>
+        )}
+      </Alert>
 
       {/* ---- HERO: sellable IC seats ---- */}
       <Tile>

@@ -11,6 +11,8 @@ import {
   TableCell,
   ProgressBar,
   Button,
+  Panel,
+  PanelBody,
   Link,
   Alert,
   EmptyState,
@@ -19,10 +21,10 @@ import {
   useExtensionContext,
 } from "@hubspot/ui-extensions";
 
-hubspot.extend(({ actions }) => <SumbleScoreBreakdownCard actions={actions} />);
+hubspot.extend(({ actions }) => <SumbleScoreBreakdownPanelCard actions={actions} />);
 
 const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
-const DEFAULT_VISIBLE = 6; // signals shown before the "show more" fold
+const DEFAULT_VISIBLE = 6; // signals shown on the card; the rest live in the panel
 
 // Mirror AccountBot's raw-value formatting so the card reads the same as Slack /
 // the scoring web app.
@@ -40,16 +42,12 @@ function fmtRaw(r, isUsd, isCount) {
 const fmtPct = (v) => `${Math.round((Number(v) || 0) * 10) / 10}%`;
 const fmtPts = (v) => `${(Number(v) || 0).toFixed(1)} pts`;
 
-// Sumble deep links sometimes lack a protocol; force https + external so HubSpot
-// renders them correctly (and its own external-link icon).
 const ext = (url) => {
   if (!url) return null;
   const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
   return { url: full, external: true };
 };
 
-// Signal column gets a fixed, generous width so long labels don't wrap to 3-4
-// lines and balloon the row height. Contribution takes the remaining space.
 const SignalTable = ({ rows, maxContrib }) => (
   <Table bordered>
     <TableHead>
@@ -86,7 +84,7 @@ const SignalTable = ({ rows, maxContrib }) => (
   </Table>
 );
 
-const SumbleScoreBreakdownCard = ({ actions }) => {
+const SumbleScoreBreakdownPanelCard = ({ actions }) => {
   const context = useExtensionContext();
   const companyId = context?.crm?.objectId;
   const portalId = context?.portal?.id;
@@ -94,7 +92,6 @@ const SumbleScoreBreakdownCard = ({ actions }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [bd, setBd] = useState(null);
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -110,7 +107,7 @@ const SumbleScoreBreakdownCard = ({ actions }) => {
         if (json.status !== "success") throw new Error(json.message || "Backend error");
         setBd(json.breakdown);
       } catch (err) {
-        console.error("[SumbleScoreBreakdown] load error:", err);
+        console.error("[SumbleScoreBreakdownPanel] load error:", err);
         setError(err.message || "Couldn't load the score breakdown.");
       } finally {
         setLoading(false);
@@ -140,7 +137,6 @@ const SumbleScoreBreakdownCard = ({ actions }) => {
 
   const signals = Array.isArray(bd.signals) ? bd.signals : [];
   const maxContrib = Math.max(...signals.map((s) => Number(s.contribution) || 0), 0.01);
-  const shown = expanded ? signals : signals.slice(0, DEFAULT_VISIBLE);
 
   return (
     <Tile>
@@ -158,10 +154,19 @@ const SumbleScoreBreakdownCard = ({ actions }) => {
           </Text>
         ) : (
           <Flex direction="column" gap="small">
-            <SignalTable rows={shown} maxContrib={maxContrib} />
+            <SignalTable rows={signals.slice(0, DEFAULT_VISIBLE)} maxContrib={maxContrib} />
             {signals.length > DEFAULT_VISIBLE ? (
-              <Button variant="secondary" onClick={() => setExpanded((v) => !v)}>
-                {expanded ? "Show fewer" : `Show all ${signals.length} signals`}
+              <Button
+                variant="secondary"
+                overlay={
+                  <Panel id="sumble-score-breakdown-panel" title="Score breakdown — all signals" width="lg">
+                    <PanelBody>
+                      <SignalTable rows={signals} maxContrib={maxContrib} />
+                    </PanelBody>
+                  </Panel>
+                }
+              >
+                {`View all ${signals.length} signals`}
               </Button>
             ) : null}
           </Flex>
