@@ -71,7 +71,7 @@ const SumbleSettings = ({ context }) => {
     setDisconnecting(true);
     setMsg(null);
     try {
-      const json = await call(`/api/sumble-connection?portalId=${encodeURIComponent(portalId || "")}`, { method: "DELETE" });
+      const json = await call(`/api/sumble-connection?portalId=${encodeURIComponent(portalId || "")}`, { method: "DELETE", body: { portalId } });
       setMsg({ type: "success", text: json.note || "Disconnected. Stored key removed." });
       await loadStatus();
     } catch (err) {
