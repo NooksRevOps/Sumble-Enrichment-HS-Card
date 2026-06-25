@@ -83,21 +83,41 @@ const timeAgo = (iso) => {
   return `${mo} month${mo === 1 ? "" : "s"} ago`;
 };
 
-const LINK_RE = /^\[([^\]]+)\]\(([^)]+)\)$/;
-const renderInline = (line, keyBase) => {
-  const tokenRe = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g;
-  const parts = line.split(tokenRe).filter((s) => s !== "");
-  return parts.map((seg, i) => {
-    const link = seg.match(LINK_RE);
-    if (link) return <Link key={`${keyBase}-${i}`} href={ext(link[2])}>{link[1]}</Link>;
-    const bold = seg.match(/^\*\*([^*]+)\*\*$/);
-    if (bold) {
-      const innerLink = bold[1].match(LINK_RE);
-      if (innerLink) return <Link key={`${keyBase}-${i}`} href={ext(innerLink[2])}>{innerLink[1]}</Link>;
-      return <Text key={`${keyBase}-${i}`} inline format={{ fontWeight: "bold" }}>{bold[1]}</Text>;
+// Render a run of text, extracting any inline [text](url) links. `bold` makes
+// the non-link text bold (links can't carry bold, so they render as plain Links).
+const renderTextRun = (str, keyBase, bold) => {
+  const fmt = bold ? { fontWeight: "bold" } : undefined;
+  const nodes = [];
+  let last = 0;
+  let i = 0;
+  for (const m of str.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
+    if (m.index > last) {
+      nodes.push(<Text key={`${keyBase}-t${i}`} inline format={fmt}>{str.slice(last, m.index)}</Text>);
     }
-    return <Text key={`${keyBase}-${i}`} inline>{seg}</Text>;
-  });
+    nodes.push(<Link key={`${keyBase}-l${i}`} href={ext(m[2])}>{m[1]}</Link>);
+    last = m.index + m[0].length;
+    i++;
+  }
+  if (last < str.length) {
+    nodes.push(<Text key={`${keyBase}-t${i}`} inline format={fmt}>{str.slice(last)}</Text>);
+  }
+  return nodes;
+};
+
+// Render a line: split out **bold** runs, and extract links inside both the
+// bold runs and the surrounding text (Sumble puts links inside bold headers).
+const renderInline = (line, keyBase) => {
+  const out = [];
+  let last = 0;
+  let i = 0;
+  for (const m of line.matchAll(/\*\*([^*]+)\*\*/g)) {
+    if (m.index > last) out.push(...renderTextRun(line.slice(last, m.index), `${keyBase}-n${i}`, false));
+    out.push(...renderTextRun(m[1], `${keyBase}-b${i}`, true));
+    last = m.index + m[0].length;
+    i++;
+  }
+  if (last < line.length) out.push(...renderTextRun(line.slice(last), `${keyBase}-n${i}`, false));
+  return out;
 };
 
 const renderMarkdown = (md) => {
