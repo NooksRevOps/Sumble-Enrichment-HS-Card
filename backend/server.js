@@ -9,7 +9,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const ENV_SUMBLE_KEY = process.env.SUMBLE_API_KEY; // fallback when no key is stored
 const HUBSPOT_SERVICE_KEY = process.env.HUBSPOT_SERVICE_KEY;
 // Single-tenant guard: if set, only this HubSpot portal may connect/use Sumble.
 // (For multi-tenant/marketplace, replace with HubSpot request-signature verification.)
@@ -49,7 +48,7 @@ const BRIEF_TTL_MS = Infinity;                  // brief never auto-expires; ref
 const ORG_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // 30d (org id rarely changes)
 
 console.log(`[STARTUP] Sumble backend at ${new Date().toISOString()}`);
-console.log(`[STARTUP] env Sumble key: ${!!ENV_SUMBLE_KEY} | HubSpot key: ${!!HUBSPOT_SERVICE_KEY} | portal guard: ${ALLOWED_PORTAL_ID || 'off'}`);
+console.log(`[STARTUP] HubSpot key: ${!!HUBSPOT_SERVICE_KEY} | portal guard: ${ALLOWED_PORTAL_ID || 'off'}`);
 console.log(`[STARTUP] score breakdowns: ${SERVICE_API_KEY ? 'on' : 'OFF (set SERVICE_API_KEY)'} | source: ${SCORING_BREAKDOWNS_URL}`);
 
 const sumbleHeaders = (apiKey) => ({
@@ -61,8 +60,9 @@ const hubspotHeaders = () => ({
   'Content-Type': 'application/json',
 });
 
-// Resolve the Sumble key for a request: the admin-connected key stored for this
-// portal (encrypted in Postgres), else the ENV_SUMBLE_KEY fallback.
+// Resolve the Sumble key for a request: ONLY the admin-connected key stored for
+// this portal (encrypted in Postgres). There is no env/backend fallback — if no
+// key is connected in Settings, Sumble is not connected for this portal.
 async function resolveSumbleKey(portalId) {
   if (portalId) {
     try {
@@ -72,16 +72,21 @@ async function resolveSumbleKey(portalId) {
       console.error('[KEY] getSecret failed:', err.message);
     }
   }
-  return ENV_SUMBLE_KEY || null;
+  return null;
 }
 
-// Probe a Sumble key with a cheap call. Returns { ok, status }. We only treat a
-// 401 as a definitively bad key — a 403 (key valid but lacks list scope), 429,
-// 5xx, or network blip shouldn't block a key an admin is sure about.
+// Probe a Sumble key by hitting the organizations endpoint. Returns { ok, status }.
+// A key is only rejected on HTTP 401 (unauthorized) — any other status (403, 429,
+// 5xx, network blip) is treated as "not a definitively bad key" so a key an admin
+// is sure about isn't blocked.
 async function testSumbleKey(apiKey) {
   try {
-    const resp = await fetch(`${SUMBLE_BASE}/v6/organization-lists`, { headers: sumbleHeaders(apiKey) });
-    return { ok: resp.ok, status: resp.status };
+    const resp = await fetch(`${SUMBLE_BASE}/v6/organizations`, {
+      method: 'POST',
+      headers: sumbleHeaders(apiKey),
+      body: JSON.stringify({ limit: 1 }),
+    });
+    return { ok: resp.status !== 401, status: resp.status };
   } catch (e) {
     return { ok: false, status: 0, error: e.message };
   }
@@ -1005,7 +1010,6 @@ app.get('/api/sumble-connection', async (req, res) => {
       const s = await db.getSecret(portalId).catch(() => null);
       if (s && s.value) { connected = true; masked = mask(s.value); updatedAt = s.updatedAt; source = 'stored'; }
     }
-    if (!connected && ENV_SUMBLE_KEY) { connected = true; masked = mask(ENV_SUMBLE_KEY); source = 'env'; }
     res.json({ status: 'success', connected, masked, updatedAt, source, encryption: db.encryptionEnabled });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -1023,9 +1027,9 @@ app.post('/api/sumble-connection', async (req, res) => {
       return res.status(500).json({ status: 'error', message: 'Backend encryption is not configured (set ENCRYPTION_KEY). Credentials are only stored encrypted.' });
     }
     const check = await testSumbleKey(apiKey.trim());
-    console.log(`[CONNECT] key probe status: ${check.status}${check.error ? ` (${check.error})` : ''}`);
+    console.log(`[CONNECT] key probe (organizations) status: ${check.status}${check.error ? ` (${check.error})` : ''}`);
     // Only a 401 means Sumble actually rejected the key. Store it for anything
-    // else (ok / 403-no-scope / 429 / 5xx / network) so a valid key isn't blocked.
+    // else (ok / 429 / 5xx / network) so a valid key isn't blocked.
     if (check.status === 401) {
       return res.status(400).json({ status: 'error', message: 'Sumble rejected that key (401 Unauthorized). Double-check it at sumble.com/account/api-keys.' });
     }
@@ -1046,12 +1050,11 @@ app.delete('/api/sumble-connection', async (req, res) => {
     if (!portalId) return res.status(400).json({ status: 'error', message: 'Missing portalId' });
     if (!portalAllowed(portalId)) return res.status(403).json({ status: 'error', message: 'Not allowed.' });
     await db.deleteSecret(portalId);
+    await db.setCached('global', 'sumble_lists', null); // bust list cache so a stale key's data doesn't linger
     res.json({
       status: 'success',
-      connected: !!ENV_SUMBLE_KEY,
-      note: ENV_SUMBLE_KEY
-        ? 'Your stored key was removed, but the cards are still using the shared backend fallback key (SUMBLE_API_KEY on Render). Remove that env var to fully disconnect.'
-        : 'Stored key removed.',
+      connected: false,
+      note: 'Disconnected. The stored key was removed — Sumble cards in this account will stop working until a key is connected again.',
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });

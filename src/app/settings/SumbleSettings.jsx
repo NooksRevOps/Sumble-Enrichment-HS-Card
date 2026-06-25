@@ -88,7 +88,6 @@ const SumbleSettings = ({ context }) => {
   }
 
   const connected = status?.connected;
-  const source = status?.source;
 
   return (
     <Flex direction="column" gap="medium">
@@ -103,22 +102,14 @@ const SumbleSettings = ({ context }) => {
 
       {/* Current status */}
       <Flex direction="row" gap="small" align="center" wrap="wrap">
-        {connected && source === "stored" ? (
+        {connected ? (
           <StatusTag variant="success">Connected</StatusTag>
-        ) : connected && source === "env" ? (
-          <StatusTag variant="info">Using backend fallback key</StatusTag>
         ) : (
           <StatusTag variant="danger">Not connected</StatusTag>
         )}
         {status?.masked ? <Text variant="microcopy">Key: {status.masked}</Text> : null}
         {status?.updatedAt ? <Text variant="microcopy">· updated {new Date(status.updatedAt).toLocaleDateString()}</Text> : null}
       </Flex>
-
-      {source === "env" ? (
-        <Text variant="microcopy">
-          A fallback key is set on the backend. Save a key here to manage the connection in-app instead.
-        </Text>
-      ) : null}
 
       {status && status.encryption === false ? (
         <Alert title="Encryption not configured" variant="warning">
@@ -149,9 +140,9 @@ const SumbleSettings = ({ context }) => {
             onClick={connect}
             variant="primary"
           >
-            {connected && source === "stored" ? "Test & replace key" : "Test & connect"}
+            {connected ? "Test & replace key" : "Test & connect"}
           </LoadingButton>
-          {connected && source === "stored" ? (
+          {connected ? (
             <LoadingButton loading={disconnecting} onClick={disconnect} variant="destructive">
               Disconnect
             </LoadingButton>
