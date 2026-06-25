@@ -53,9 +53,12 @@ const SumbleSettings = ({ context }) => {
     setSaving(true);
     setMsg(null);
     try {
-      await call("/api/sumble-connection", { method: "POST", body: { portalId, apiKey: apiKey.trim() } });
+      const json = await call("/api/sumble-connection", { method: "POST", body: { portalId, apiKey: apiKey.trim() } });
       setApiKey("");
-      setMsg({ type: "success", text: "Sumble connected. All Sumble cards in this account now use this key." });
+      setMsg({
+        type: "success",
+        text: json.note || "Sumble connected. All Sumble cards in this account now use this key.",
+      });
       await loadStatus();
     } catch (err) {
       setMsg({ type: "error", text: err.message || "Couldn't connect." });
@@ -68,8 +71,8 @@ const SumbleSettings = ({ context }) => {
     setDisconnecting(true);
     setMsg(null);
     try {
-      await call("/api/sumble-connection", { method: "DELETE", body: { portalId } });
-      setMsg({ type: "success", text: "Disconnected. Stored key removed." });
+      const json = await call("/api/sumble-connection", { method: "DELETE", body: { portalId } });
+      setMsg({ type: "success", text: json.note || "Disconnected. Stored key removed." });
       await loadStatus();
     } catch (err) {
       setMsg({ type: "error", text: err.message || "Couldn't disconnect." });
