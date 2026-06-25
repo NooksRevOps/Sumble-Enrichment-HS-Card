@@ -1046,7 +1046,7 @@ app.post('/api/sumble-connection', async (req, res) => {
 // Disconnect: remove the stored key for this portal.
 app.delete('/api/sumble-connection', async (req, res) => {
   try {
-    const { portalId } = req.body || {};
+    const portalId = req.query.portalId || (req.body && req.body.portalId);
     if (!portalId) return res.status(400).json({ status: 'error', message: 'Missing portalId' });
     if (!portalAllowed(portalId)) return res.status(403).json({ status: 'error', message: 'Not allowed.' });
     await db.deleteSecret(portalId);
