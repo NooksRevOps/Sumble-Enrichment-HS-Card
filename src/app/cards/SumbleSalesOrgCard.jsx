@@ -341,9 +341,9 @@ const SumbleSalesOrgCard = ({ actions }) => {
         <Flex direction="column" gap="small">
           <Heading inline>Sellable seats — IC headcount</Heading>
           <Text variant="microcopy">
-            Big number is <Text inline format={{ fontWeight: "demibold" }}>sellable</Text> — IC reps in
-            sellable regions, excluding offshore-heavy locations (India, Pakistan, Brazil, etc.) where SDR
-            work is typically outsourced. "of N all" is every location.
+            Count of IC AEs, SDRs, and Total Sales (AE+SDR) in{" "}
+            <Text inline format={{ fontWeight: "demibold" }}>sellable</Text> regions, excluding offshore-heavy
+            locations (India, Pakistan, Brazil, etc.) where SDR work is typically outsourced.
           </Text>
           <Statistics>
             <StatisticsItem label="IC SDRs" number={fmtInt(sellSdr)}>
@@ -373,7 +373,7 @@ const SumbleSalesOrgCard = ({ actions }) => {
           <Heading inline>GTM org breakdown</Heading>
           <Text variant="microcopy">
             <Text inline format={{ fontWeight: "demibold" }}>Full sales-org headcount</Text> — all geographies and
-            all seniorities, managers and leadership included. Not the sellable IC subset above.
+            all seniorities, managers and leadership included.
           </Text>
           <Statistics>
             <StatisticsItem label="Total sales team" number={fmtInt(p.sumble_sales_people_count)} />
@@ -408,22 +408,26 @@ const SumbleSalesOrgCard = ({ actions }) => {
           </Statistics>
           <Flex direction="row" gap="large" wrap="wrap">
             {isTrue(p.sumble_is_b2b) || isTrue(p.sumble_is_b2c) || isTrue(p.sumble_is_ai_native) ? (
-              <Flex direction="column" gap="extra-small">
-                <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Business model</Text>
-                <Flex direction="row" gap="extra-small" wrap="wrap">
-                  {isTrue(p.sumble_is_b2b) ? <Tag variant="default">B2B</Tag> : null}
-                  {isTrue(p.sumble_is_b2c) ? <Tag variant="default">B2C</Tag> : null}
-                  {isTrue(p.sumble_is_ai_native) ? <Tag variant="default">AI-native</Tag> : null}
+              <Box flex="auto">
+                <Flex direction="column" gap="extra-small">
+                  <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Business model</Text>
+                  <Flex direction="row" gap="extra-small" wrap="wrap">
+                    {isTrue(p.sumble_is_b2b) ? <Tag variant="default">B2B</Tag> : null}
+                    {isTrue(p.sumble_is_b2c) ? <Tag variant="default">B2C</Tag> : null}
+                    {isTrue(p.sumble_is_ai_native) ? <Tag variant="default">AI-native</Tag> : null}
+                  </Flex>
                 </Flex>
-              </Flex>
+              </Box>
             ) : null}
             {leadgenTools.length > 0 ? (
-              <Flex direction="column" gap="extra-small">
-                <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
-                <Flex direction="row" gap="extra-small" wrap="wrap">
-                  {leadgenTools.map((t, i) => <Tag key={i} variant="info">{t}</Tag>)}
+              <Box flex="auto">
+                <Flex direction="column" gap="extra-small">
+                  <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
+                  <Flex direction="row" gap="extra-small" wrap="wrap">
+                    {leadgenTools.map((t, i) => <Tag key={i} variant="info">{t}</Tag>)}
+                  </Flex>
                 </Flex>
-              </Flex>
+              </Box>
             ) : null}
           </Flex>
         </Flex>

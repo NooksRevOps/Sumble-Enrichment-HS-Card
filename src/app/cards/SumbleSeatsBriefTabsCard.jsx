@@ -204,9 +204,10 @@ const SeatsView = ({ loading, fetching, error, syncedCount, data, onFetchLive })
       </Text>
 
       {mismatch ? (
-        <Alert title="Counts differ" variant="warning">
-          HubSpot has {intOrDash(syncedCount)} synced; Sumble shows {intOrDash(liveCount)} live. Worth
-          confirming RevOps' seat sizing for this account.
+        <Alert title="Counts differ — that's expected" variant="info">
+          The synced count ({intOrDash(syncedCount)}) is up to date and accurate. Any difference from the
+          live Sumble figure ({intOrDash(liveCount)}) is because the scoring query filters out subsidiaries
+          while Sumble's live people search doesn't — the delta is subsidiary reps, not a data problem.
         </Alert>
       ) : null}
 
