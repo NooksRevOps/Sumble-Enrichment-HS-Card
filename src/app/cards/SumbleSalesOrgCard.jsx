@@ -283,6 +283,15 @@ const SumbleSalesOrgCard = ({ actions }) => {
           <Statistics>
             <StatisticsItem label="Tier" number={tier.label} />
             <StatisticsItem label="Segment" number={segment || "—"} />
+            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
+              {growth && growthN !== null ? (
+                <StatisticsTrend
+                  value={`${growth} YoY`}
+                  direction={growthN >= 0 ? "increase" : "decrease"}
+                  color={growthN >= 0 ? "green" : "red"}
+                />
+              ) : null}
+            </StatisticsItem>
           </Statistics>
 
           {/* colored callout makes the tier rating impossible to miss
@@ -337,15 +346,6 @@ const SumbleSalesOrgCard = ({ actions }) => {
             work is typically outsourced. "of N all" is every location.
           </Text>
           <Statistics>
-            <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
-              {growth && growthN !== null ? (
-                <StatisticsTrend
-                  value={`${growth} YoY`}
-                  direction={growthN >= 0 ? "increase" : "decrease"}
-                  color={growthN >= 0 ? "green" : "red"}
-                />
-              ) : null}
-            </StatisticsItem>
             <StatisticsItem label="IC SDRs" number={fmtInt(sellSdr)}>
               <Text variant="microcopy">of {fmtInt(p.sumble_sdr_ic_people_count)} all</Text>
             </StatisticsItem>
@@ -356,12 +356,12 @@ const SumbleSalesOrgCard = ({ actions }) => {
               <Text variant="microcopy">of {fmtInt(p.estimated__ic_sales_team_sumble)} all</Text>
             </StatisticsItem>
           </Statistics>
-          <Flex direction="row" gap="medium" wrap="wrap">
+          <Flex direction="row" gap="small" justify="center" wrap="wrap">
             {ext(p.sumble_sellable_sdr_ic_people_url) ? (
-              <Link href={ext(p.sumble_sellable_sdr_ic_people_url)}>View sellable SDRs in Sumble</Link>
+              <Button href={ext(p.sumble_sellable_sdr_ic_people_url)} variant="secondary">View sellable SDRs in Sumble</Button>
             ) : null}
             {ext(p.sumble_sellable_ae_ic_people_url) ? (
-              <Link href={ext(p.sumble_sellable_ae_ic_people_url)}>View sellable AEs in Sumble</Link>
+              <Button href={ext(p.sumble_sellable_ae_ic_people_url)} variant="secondary">View sellable AEs in Sumble</Button>
             ) : null}
           </Flex>
         </Flex>
@@ -371,10 +371,14 @@ const SumbleSalesOrgCard = ({ actions }) => {
       <Tile>
         <Flex direction="column" gap="small">
           <Heading inline>GTM org breakdown</Heading>
+          <Text variant="microcopy">
+            <Text inline format={{ fontWeight: "demibold" }}>Full sales-org headcount</Text> — all geographies and
+            all seniorities, managers and leadership included. Not the sellable IC subset above.
+          </Text>
           <Statistics>
-            <StatisticsItem label="Total Sales" number={fmtInt(p.sumble_sales_people_count)} />
-            <StatisticsItem label="All SDRs" number={fmtInt(p.sumble_sdr_people_count)} />
-            <StatisticsItem label="All AEs" number={fmtInt(p.sumble_ae_people_count)} />
+            <StatisticsItem label="Total sales team" number={fmtInt(p.sumble_sales_people_count)} />
+            <StatisticsItem label="Sales development team size" number={fmtInt(p.sumble_sdr_people_count)} />
+            <StatisticsItem label="Sales team size" number={fmtInt(p.sumble_ae_people_count)} />
           </Statistics>
           <Statistics>
             <StatisticsItem label="RevOps" number={fmtInt(p.sumble_revops_people_count)} />
@@ -402,24 +406,26 @@ const SumbleSalesOrgCard = ({ actions }) => {
             <StatisticsItem label="SDR posts · 2yr" number={fmtInt(p.sumble_sdr_job_post_2yr_count)} />
             <StatisticsItem label="AE posts · 1mo" number={fmtInt(p.sumble_ae_job_post_1mo_count)} />
           </Statistics>
-          {isTrue(p.sumble_is_b2b) || isTrue(p.sumble_is_b2c) || isTrue(p.sumble_is_ai_native) ? (
-            <Flex direction="column" gap="extra-small">
-              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Business model</Text>
-              <Flex direction="row" gap="extra-small" wrap="wrap">
-                {isTrue(p.sumble_is_b2b) ? <Tag variant="default">B2B</Tag> : null}
-                {isTrue(p.sumble_is_b2c) ? <Tag variant="default">B2C</Tag> : null}
-                {isTrue(p.sumble_is_ai_native) ? <Tag variant="default">AI-native</Tag> : null}
+          <Flex direction="row" gap="large" wrap="wrap">
+            {isTrue(p.sumble_is_b2b) || isTrue(p.sumble_is_b2c) || isTrue(p.sumble_is_ai_native) ? (
+              <Flex direction="column" gap="extra-small">
+                <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Business model</Text>
+                <Flex direction="row" gap="extra-small" wrap="wrap">
+                  {isTrue(p.sumble_is_b2b) ? <Tag variant="default">B2B</Tag> : null}
+                  {isTrue(p.sumble_is_b2c) ? <Tag variant="default">B2C</Tag> : null}
+                  {isTrue(p.sumble_is_ai_native) ? <Tag variant="default">AI-native</Tag> : null}
+                </Flex>
               </Flex>
-            </Flex>
-          ) : null}
-          {leadgenTools.length > 0 ? (
-            <Flex direction="column" gap="extra-small">
-              <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
-              <Flex direction="row" gap="extra-small" wrap="wrap">
-                {leadgenTools.map((t, i) => <Tag key={i} variant="info">{t}</Tag>)}
+            ) : null}
+            {leadgenTools.length > 0 ? (
+              <Flex direction="column" gap="extra-small">
+                <Text variant="microcopy" format={{ fontWeight: "demibold" }}>Primary lead-gen tools</Text>
+                <Flex direction="row" gap="extra-small" wrap="wrap">
+                  {leadgenTools.map((t, i) => <Tag key={i} variant="info">{t}</Tag>)}
+                </Flex>
               </Flex>
-            </Flex>
-          ) : null}
+            ) : null}
+          </Flex>
         </Flex>
       </Tile>
 
