@@ -195,9 +195,13 @@ const SeatsView = ({ loading, fetching, error, syncedCount, data, onFetchLive })
       </Flex>
 
       <Statistics>
-        <StatisticsItem label="Synced SDRs" number={intOrDash(syncedCount)} />
-        {!notLoaded ? <StatisticsItem label="Live SDRs" number={intOrDash(liveCount)} /> : null}
+        <StatisticsItem label="Sellable SDRs · synced" number={intOrDash(syncedCount)} />
+        {!notLoaded ? <StatisticsItem label="Sellable SDRs · live" number={intOrDash(liveCount)} /> : null}
       </Statistics>
+      <Text variant="microcopy">
+        Counts and the table below are <Text inline format={{ fontWeight: "demibold" }}>sellable only</Text> —
+        IC reps in sellable regions, excluding offshore-heavy locations (India, Pakistan, Brazil, etc.).
+      </Text>
 
       {mismatch ? (
         <Alert title="Counts differ" variant="warning">
@@ -404,7 +408,7 @@ const SumbleSeatsBriefTabsCard = ({ actions }) => {
   const callPeople = async (path, cachedOnly) => {
     const resp = await hubspot.fetch(`${BACKEND_URL}${path}`, {
       method: "POST",
-      body: { companyId, want: "people", cachedOnly, portalId },
+      body: { companyId, want: "people", cachedOnly, portalId, sellable: true },
     });
     const json = await resp.json();
     if (json.status !== "success") throw new Error(json.message || "Backend error");
@@ -417,8 +421,8 @@ const SumbleSeatsBriefTabsCard = ({ actions }) => {
       try {
         setPeopleLoading(true);
         setPeopleError(null);
-        const props = await actions.fetchCrmObjectProperties(["sumble_sdr_ic_people_count"]);
-        setSyncedCount(props.sumble_sdr_ic_people_count || null);
+        const props = await actions.fetchCrmObjectProperties(["sumble_sellable_sdr_ic_people_count"]);
+        setSyncedCount(props.sumble_sellable_sdr_ic_people_count || null);
         setPeopleData(await callPeople("/api/enrichment", true));
       } catch (err) {
         console.error("[SumblePeople] load error:", err);

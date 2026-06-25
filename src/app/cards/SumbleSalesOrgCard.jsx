@@ -40,6 +40,8 @@ const PROPERTIES = [
   "sumble_employee_count", "sumble_total_people_trends_1yr_percent_g",
   "sumble_sdr_ic_people_count", "sumble_sdr_people_count", "sumble_sdr_pct_of_sales",
   "sumble_ae_ic_people_count_people_count", "sumble_ae_people_count", "estimated__ic_sales_team_sumble",
+  "sumble_sellable_sdr_ic_people_count", "sumble_sellable_ae_ic_people_count",
+  "sumble_sellable_sdr_ic_people_url", "sumble_sellable_ae_ic_people_url",
   "sumble_sales_people_count", "sumble_sales_pct_of_employees",
   "sumble_business_development_people_count", "sumble_revops_people_count",
   "sumble_sales_enablement_people_count", "sumble_growth_marketing_people_count",
@@ -262,6 +264,11 @@ const SumbleSalesOrgCard = ({ actions }) => {
   const bdSignals = Array.isArray(bd?.signals) ? bd.signals : [];
   const bdMax = Math.max(...bdSignals.map((s) => Number(s.contribution) || 0), 0.01);
 
+  // Sellable = IC reps in sellable regions (excl. offshore-heavy locations).
+  const sellSdr = num(p.sumble_sellable_sdr_ic_people_count);
+  const sellAe = num(p.sumble_sellable_ae_ic_people_count);
+  const sellTotal = sellSdr === null && sellAe === null ? null : (sellSdr || 0) + (sellAe || 0);
+
   return (
     <Flex direction="column" gap="medium">
       {/* ---- Tier + Segment, with a colored tier callout + breakdown panel ---- */}
@@ -314,12 +321,14 @@ const SumbleSalesOrgCard = ({ actions }) => {
         )}
       </Alert>
 
-      {/* ---- HERO: sellable IC seats ---- */}
+      {/* ---- HERO: sellable IC seats (big = sellable, subtext = all locations) ---- */}
       <Tile>
         <Flex direction="column" gap="small">
           <Heading inline>Sellable seats — IC headcount</Heading>
           <Text variant="microcopy">
-            Sumble's individual-contributor SDR and AE estimates — the basis for Nooks seat sizing.
+            Big number is <Text inline format={{ fontWeight: "demibold" }}>sellable</Text> — IC reps in
+            sellable regions, excluding offshore-heavy locations (India, Pakistan, Brazil, etc.) where SDR
+            work is typically outsourced. "of N all" is every location.
           </Text>
           <Statistics>
             <StatisticsItem label="Employees" number={fmtInt(p.sumble_employee_count)}>
@@ -331,16 +340,22 @@ const SumbleSalesOrgCard = ({ actions }) => {
                 />
               ) : null}
             </StatisticsItem>
-            <StatisticsItem label="IC SDRs" number={fmtInt(p.sumble_sdr_ic_people_count)} />
-            <StatisticsItem label="IC AEs" number={fmtInt(p.sumble_ae_ic_people_count_people_count)} />
-            <StatisticsItem label="Total IC Sales" number={fmtInt(p.estimated__ic_sales_team_sumble)} />
+            <StatisticsItem label="IC SDRs" number={fmtInt(sellSdr)}>
+              <Text variant="microcopy">of {fmtInt(p.sumble_sdr_ic_people_count)} all</Text>
+            </StatisticsItem>
+            <StatisticsItem label="IC AEs" number={fmtInt(sellAe)}>
+              <Text variant="microcopy">of {fmtInt(p.sumble_ae_ic_people_count_people_count)} all</Text>
+            </StatisticsItem>
+            <StatisticsItem label="Total IC" number={fmtInt(sellTotal)}>
+              <Text variant="microcopy">of {fmtInt(p.estimated__ic_sales_team_sumble)} all</Text>
+            </StatisticsItem>
           </Statistics>
           <Flex direction="row" gap="medium" wrap="wrap">
-            {ext(p.sumble_sdr_ic_people_url) ? (
-              <Link href={ext(p.sumble_sdr_ic_people_url)}>View IC SDRs in Sumble</Link>
+            {ext(p.sumble_sellable_sdr_ic_people_url) ? (
+              <Link href={ext(p.sumble_sellable_sdr_ic_people_url)}>View sellable SDRs in Sumble</Link>
             ) : null}
-            {ext(p.sumble_ae_people_url) ? (
-              <Link href={ext(p.sumble_ae_people_url)}>View AEs in Sumble</Link>
+            {ext(p.sumble_sellable_ae_ic_people_url) ? (
+              <Link href={ext(p.sumble_sellable_ae_ic_people_url)}>View sellable AEs in Sumble</Link>
             ) : null}
           </Flex>
         </Flex>

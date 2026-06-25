@@ -34,6 +34,15 @@ const IC_JOB_LEVELS = ['Individual Contributor', 'Senior', 'Lead', 'Principal'];
 const PEOPLE_TARGET = 10; // fill up to this many rows: SDRs first, then AEs
 const JOBS_LIMIT = 10;     // job-posting fallback when no SDR/AE people exist
 
+// "Sellable" = IC reps in sellable regions, excluding offshore-heavy locations
+// (India/Pakistan/Brazil/etc.) where SDR work is typically outsourced. Allow-lists
+// lifted verbatim from the Sumble sellable people queries.
+const SELLABLE_HQ_LOCATIONS = ['Europe', 'NAMER', 'IL', 'AU', 'JP', 'ID', 'SG', 'MY', 'VN', 'NZ', 'KR', 'HK', 'TW', 'CN', 'TH', 'BD', 'LK', 'NP', 'KH', 'MM', 'UZ', 'MN', 'MH', 'PG', 'TV', 'MV', 'VU', 'KG', 'FJ', 'AF', 'FM', 'BT', 'TJ', 'KI', 'TM', 'WF', 'PW', 'WS', 'SB', 'NR', 'TL', 'TO', 'AR', 'PE', 'CL', 'EC', 'UY', 'GT', 'CR', 'PA', 'BO', 'DO', 'VE', 'SV', 'PY', 'JM', 'HN', 'BS', 'GD', 'NI', 'CU', 'BZ', 'TT', 'LC', 'SR', 'AG', 'HT', 'BB', 'VC', 'GY', 'MQ', 'KN', 'DM', 'AW', 'BQ', 'ZA', 'Africa', 'SA', 'IR', 'BH', 'JO', 'QA', 'LB', 'IQ', 'KW', 'OM', 'YE'];
+const SELLABLE_COUNTRIES = ['US', 'CA', 'MX', 'AT', 'BE', 'HR', 'CZ', 'DK', 'FI', 'FR', 'DE', 'GR', 'IS', 'IE', 'IT', 'LI', 'LU', 'MC', 'NL', 'NO', 'PL', 'PT', 'RO', 'ES', 'SE', 'CH', 'TR', 'UK', 'IL', 'AU', 'JP', 'SG', 'NZ', 'HK', 'CL', 'ZA', 'BO', 'RS', 'HU', 'BG', 'LT'];
+const sqlList = (arr) => arr.map((v) => `'${v}'`).join(', ');
+const sellablePeopleQuery = (jobFunction) =>
+  `job_function EQ '${jobFunction}' AND job_level IN (${sqlList(IC_JOB_LEVELS)}) AND hq_location IN (${sqlList(SELLABLE_HQ_LOCATIONS)}) AND country IN (${sqlList(SELLABLE_COUNTRIES)})`;
+
 // Cache TTLs
 const PEOPLE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — matches Sumble's ~monthly refresh
 const BRIEF_TTL_MS = Infinity;                  // brief never auto-expires; refresh is manual
@@ -109,16 +118,17 @@ function orgKeyFor(company) {
 }
 
 // ---- Sumble: people for a given function set (IC levels) ----
-async function fetchPeople(domain, jobFunctions, limit, apiKey) {
+async function fetchPeople(domain, jobFunctions, limit, apiKey, sellable = false) {
   if (limit <= 0) return { people: [], totalCount: 0 };
+  // Sellable adds the hq_location/country allow-lists via the query form; the
+  // default keeps the existing job_functions/job_levels object form.
+  const filters = sellable
+    ? { query: sellablePeopleQuery(jobFunctions[0]) }
+    : { job_functions: jobFunctions, job_levels: IC_JOB_LEVELS };
   const resp = await fetch(`${SUMBLE_BASE}${SUMBLE_PEOPLE_FIND_PATH}`, {
     method: 'POST',
     headers: sumbleHeaders(apiKey),
-    body: JSON.stringify({
-      organization: { domain },
-      filters: { job_functions: jobFunctions, job_levels: IC_JOB_LEVELS },
-      limit,
-    }),
+    body: JSON.stringify({ organization: { domain }, filters, limit }),
   });
   if (!resp.ok) {
     const e = await resp.json().catch(() => ({}));
@@ -175,13 +185,13 @@ async function fetchJobs(domain, jobFunction, limit, apiKey) {
 }
 
 // ---- Cascade: top-10 SDRs, top up with AEs, fall back to SDR job postings ----
-async function buildSdrPeopleData(domain, apiKey) {
-  const sdr = await fetchPeople(domain, SDR_JOB_FUNCTIONS, PEOPLE_TARGET, apiKey);
+async function buildSdrPeopleData(domain, apiKey, sellable = false) {
+  const sdr = await fetchPeople(domain, SDR_JOB_FUNCTIONS, PEOPLE_TARGET, apiKey, sellable);
   let people = sdr.people.map((p) => ({ ...p, type: 'SDR' }));
   let aeLiveCount = null;
 
   if (people.length < PEOPLE_TARGET) {
-    const ae = await fetchPeople(domain, AE_JOB_FUNCTIONS, PEOPLE_TARGET - people.length, apiKey);
+    const ae = await fetchPeople(domain, AE_JOB_FUNCTIONS, PEOPLE_TARGET - people.length, apiKey, sellable);
     aeLiveCount = ae.totalCount;
     people = people.concat(ae.people.map((p) => ({ ...p, type: 'AE' })));
   }
@@ -264,11 +274,13 @@ app.get('/health', (_req, res) =>
 // it returns cached data or a `*_not_loaded` status. A paid call happens only
 // when the card explicitly passes cachedOnly=false (a deliberate button click)
 // or force=true (Refresh). This is the credit safeguard.
-async function buildEnrichment(companyId, { force = false, want = 'all', cachedOnly = true, sumbleKey = null } = {}) {
+async function buildEnrichment(companyId, { force = false, want = 'all', cachedOnly = true, sumbleKey = null, sellable = false } = {}) {
   const NOT_CONNECTED = 'Sumble isn\'t connected. An admin can connect it in the app\'s Settings.';
   const company = await getCompany(companyId);
   const domain = cleanDomain(company);
   const orgKey = orgKeyFor(company);
+  // Sellable people are a different result set → cache them separately.
+  const peopleSection = sellable ? 'people_sellable' : 'people';
   const result = {
     companyId,
     domain,
@@ -278,6 +290,7 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
       ? parseInt(company.sumble_sdr_ic_people_count, 10)
       : null,
     sdrDeepLinkUrl: sdrDeepLink(company),
+    sellable,
   };
 
   if (!domain && !orgKey) {
@@ -287,7 +300,7 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
 
   // ----- People (with AE top-up + job-posting fallback) -----
   if (want === 'all' || want === 'people') {
-    let pdata = force ? null : await db.getCached(orgKey, 'people', PEOPLE_TTL_MS);
+    let pdata = force ? null : await db.getCached(orgKey, peopleSection, PEOPLE_TTL_MS);
     if (pdata) {
       result.peopleStatus = 'cached';
     } else if (cachedOnly && !force) {
@@ -298,8 +311,8 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
       result.peopleError = 'No domain to query Sumble people.';
     } else {
       try {
-        pdata = await buildSdrPeopleData(domain, sumbleKey);
-        await db.setCached(orgKey, 'people', pdata);
+        pdata = await buildSdrPeopleData(domain, sumbleKey, sellable);
+        await db.setCached(orgKey, peopleSection, pdata);
         result.peopleStatus = 'loaded';
       } catch (err) {
         result.peopleError = err.message;
@@ -360,7 +373,7 @@ async function buildEnrichment(companyId, { force = false, want = 'all', cachedO
 
 app.post('/api/enrichment', async (req, res) => {
   try {
-    const { companyId, want, cachedOnly, portalId } = req.body;
+    const { companyId, want, cachedOnly, portalId, sellable } = req.body;
     if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
     const sumbleKey = await resolveSumbleKey(portalId);
     // Default cachedOnly=true so auto-load never spends credits; a deliberate
@@ -370,6 +383,7 @@ app.post('/api/enrichment', async (req, res) => {
       want: want || 'all',
       cachedOnly: cachedOnly !== false,
       sumbleKey,
+      sellable: sellable === true,
     });
     res.json({ status: 'success', ...data });
   } catch (err) {
@@ -380,10 +394,10 @@ app.post('/api/enrichment', async (req, res) => {
 
 app.post('/api/refresh', async (req, res) => {
   try {
-    const { companyId, want, portalId } = req.body;
+    const { companyId, want, portalId, sellable } = req.body;
     if (!companyId) return res.status(400).json({ status: 'error', message: 'Missing companyId' });
     const sumbleKey = await resolveSumbleKey(portalId);
-    const data = await buildEnrichment(companyId, { force: true, want: want || 'all', sumbleKey });
+    const data = await buildEnrichment(companyId, { force: true, want: want || 'all', sumbleKey, sellable: sellable === true });
     res.json({ status: 'success', ...data });
   } catch (err) {
     console.error('[REFRESH] error:', err.message);
