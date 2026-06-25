@@ -147,7 +147,13 @@ const BACKEND_URL = "https://sumble-enrichment-backend.onrender.com";
 function fmtRaw(r, isUsd, isCount) {
   const n = Number(r);
   if (Number.isNaN(n)) return String(r);
-  if (isUsd) return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  if (isUsd) {
+    const a = Math.abs(n);
+    if (a >= 1e9) return `$${(n / 1e9).toFixed(1).replace(/\.0$/, "")}B`;
+    if (a >= 1e6) return `$${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+    if (a >= 1e3) return `$${Math.round(n / 1e3)}K`;
+    return `$${Math.round(n)}`;
+  }
   if (isCount) return String(Math.round(n));
   if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(0)}M`;
   if (Math.abs(n) >= 1e4) return `${(n / 1e3).toFixed(0)}K`;
@@ -163,7 +169,7 @@ const SignalTable = ({ rows, maxContrib }) => (
         <TableHeader width={200}>Signal</TableHeader>
         <TableHeader width="min" align="right">Raw</TableHeader>
         <TableHeader width="min" align="right">Weight</TableHeader>
-        <TableHeader width={170}>Contribution</TableHeader>
+        <TableHeader width={120}>Contribution</TableHeader>
       </TableRow>
     </TableHead>
     <TableBody>
@@ -172,8 +178,8 @@ const SignalTable = ({ rows, maxContrib }) => (
           <TableCell>
             {ext(s.link) ? <Link href={ext(s.link)}>{s.label}</Link> : <Text>{s.label}</Text>}
           </TableCell>
-          <TableCell align="right"><Text>{fmtRaw(s.raw, s.is_usd, s.is_count)}</Text></TableCell>
-          <TableCell align="right"><Text>{fmtPct(s.weight_pct)}</Text></TableCell>
+          <TableCell align="right"><Text variant="microcopy">{fmtRaw(s.raw, s.is_usd, s.is_count)}</Text></TableCell>
+          <TableCell align="right"><Text variant="microcopy">{fmtPct(s.weight_pct)}</Text></TableCell>
           <TableCell>
             <ProgressBar
               variant="success"
